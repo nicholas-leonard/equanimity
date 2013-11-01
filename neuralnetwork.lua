@@ -2,31 +2,56 @@ require 'cutorch'
 require 'cunn'
 torch.setdefaulttensortype('torch.CudaTensor')
 require 'dataset/mnist'
+require 'sys'
 
---Load datasets:
+--[[parse command line arguments]]--
+cmd = torch.CmdLine()
+cmd:text()
+cmd:text('MNIST MLP Training/Optimization')
+cmd:text()
+cmd:text('Options:')
+cmd:option('-learningRate', 1e-3, 'learning rate at t=0')
+cmd:option('-batchSize', 1, 'mini-batch size (1 = pure stochastic)')
+cmd:option('-weightDecay', 0, 'weight decay')
+cmd:option('-momentum', 0, 'momentum')
+cmd:option('-numHidden', 200, 'number of hidden units')
+cmd:option('-batchSize', 32, 'number of examples per batch')
+cmd:option('-type', 'double', 'type: double | float | cuda')
+cmd:text()
+opt = cmd:parse(arg or {})
+
+--[[Load datasets]]--
 train_data = dataset.Mnist{which_set='train'}
 valid_data = dataset.Mnist{which_set='valid'}
 test_data = dataset.Mnist{which_set='test'}
 
-ninputs = train_data.n_dimensions()
-nhidden = 200
+ninputs = train_data:n_dimensions()
+nhidden = opt.numHidden
 noutputs = 10
-batch_size = 32
 
---Build a neural network:
+
+--[[Build a neural network]]--
 model = nn.Sequential()
 model:add(nn.Reshape(ninputs))
-model:add(nn.Linear(ninputs,nhiddens))
+model:add(nn.Linear(ninputs,nhidden))
 model:add(nn.Tanh())
-model:add(nn.Linear(nhiddens,noutputs))
+model:add(nn.Linear(nhidden,noutputs))
+model:add(nn.LogSoftMax())
 
---Build a training algorithm:
+--[[Add a loss function]]--
+criterion = nn.ClassNLLCriterion()
+
+--[[Build a training algorithm]]--
 optimState = {
-      learningRate = 0.001,
-      momentum = 0.7,
+      learningRate = opt.learningRate,
+      momentum = opt.momentum,
       learningRateDecay = 1e-7
    }
-   optimMethod = optim.sgd
+   
+-- Retrieve parameters and gradients:
+-- this extracts and flattens all the trainable parameters of the mode
+-- into a 1-dim vector
+parameters, gradParameters = model:getParameters()
    
 function train()
 
@@ -42,66 +67,42 @@ function train()
    -- do one epoch
    print('==> doing epoch on training data:')
    print("==> online epoch # " .. epoch .. ' [batchSize = ' .. opt.batchSize .. ']')
-   for t = 1,train_data:size(),batch_size do
+   for start = 1,train_data:size(),opt.batchSize do
+      local stop = math.min(start+opt.batchSize-1,train_data:size())
       -- disp progress
       xlua.progress(t, train_data:size())
 
       -- create mini batch
-      local inputs = {}
-      local targets = {}
-      for i = t,math.min(t+opt.batchSize-1,trainData:size()) do
-         -- load new sample
-         -- TODO : modify this to work with tensor batches:
-         local input = train_data.data[shuffle[i]]
-         local target = train_data.labels[shuffle[i]]
-         if opt.type == 'double' then input = input:double()
-         elseif opt.type == 'cuda' then input = input:cuda() end
-         table.insert(inputs, input)
-         table.insert(targets, target)
-      end
+      local indices = shuffle:sub(start,stop):long()
+      local inputs = train_data:inputs():index(1, indices)
+      local targets = train_data:targets():index(1, indices)
 
       -- create closure to evaluate f(X) and df/dX
       local feval = function(x)
-                       -- get new parameters
-                       if x ~= parameters then
-                          parameters:copy(x)
-                       end
+           -- get new parameters
+           if x ~= parameters then
+              parameters:copy(x)
+           end
 
-                       -- reset gradients
-                       gradParameters:zero()
+           -- reset gradients
+           gradParameters:zero()
 
-                       -- f is the average of all criterions
-                       local f = 0
+           --[[feedforward]]--
+           -- evaluate function for complete mini batch
+           local outputs = model:forward(inputs)
+           -- average loss (a scalar)
+           local f = criterion:forward(outputs, targets)
+           
+           --[[backpropagate]]--
+           -- estimate df/do (o is for outputs), a tensor
+           local df_do = criterion:backward(outputs, targets)
+           model:backward(inputs, df_do)
 
-                       -- evaluate function for complete mini batch
-                       for i = 1,#inputs do
-                          -- estimate f
-                          local output = model:forward(inputs[i])
-                          local err = criterion:forward(output, targets[i])
-                          f = f + err
+           -- return f and df/dX
+           return f,gradParameters
+        end
 
-                          -- estimate df/dW
-                          local df_do = criterion:backward(output, targets[i])
-                          model:backward(inputs[i], df_do)
-
-                          -- update confusion
-                          confusion:add(output, targets[i])
-                       end
-
-                       -- normalize gradients and f(X)
-                       gradParameters:div(#inputs)
-                       f = f/#inputs
-
-                       -- return f and df/dX
-                       return f,gradParameters
-                    end
-
-      -- optimize on current mini-batch
-      if optimMethod == optim.asgd then
-         _,_,average = optimMethod(feval, parameters, optimState)
-      else
-         optimMethod(feval, parameters, optimState)
-      end
+      optim.sgd(feval, parameters, optimState)
    end
 
    -- time taken

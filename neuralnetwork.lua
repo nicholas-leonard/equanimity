@@ -1,8 +1,11 @@
-require 'cutorch'
-require 'cunn'
-torch.setdefaulttensortype('torch.CudaTensor')
-require 'dataset/mnist'
+require 'torch'
 require 'sys'
+require 'optim'
+require 'nn'
+require 'paths'
+
+require 'equanimity/optim/ConfusionMatrix'
+require 'dataset/mnist'
 
 --[[parse command line arguments]]--
 cmd = torch.CmdLine()
@@ -17,8 +20,29 @@ cmd:option('-momentum', 0, 'momentum')
 cmd:option('-numHidden', 200, 'number of hidden units')
 cmd:option('-batchSize', 32, 'number of examples per batch')
 cmd:option('-type', 'double', 'type: double | float | cuda')
+cmd:option('-save', 'results', 'subdirectory to save/log experiments in')
+cmd:option('-plot', false, 'live plot')
 cmd:text()
 opt = cmd:parse(arg or {})
+
+--[[Performance Metrics]]--
+-- classes
+classes = {'0','1','2','3','4','5','6','7','8','9'}
+
+-- This matrix records the current confusion across classes
+confusion = optim.ConfusionMatrix2(classes)
+
+-- Log results to files
+trainLogger = optim.Logger(paths.concat(opt.save, 'train.log'))
+testLogger = optim.Logger(paths.concat(opt.save, 'test.log'))
+
+
+--[[GPU or CPU]]--
+if opt.type == 'cuda' then
+   require 'cutorch'
+   require 'cunn'
+   torch.setdefaulttensortype('torch.CudaTensor')
+end
 
 --[[Load datasets]]--
 train_data = dataset.Mnist{which_set='train'}
@@ -53,6 +77,7 @@ optimState = {
 -- into a 1-dim vector
 parameters, gradParameters = model:getParameters()
    
+--TODO: make this into a class:
 function train()
 
    -- epoch tracker
@@ -70,7 +95,7 @@ function train()
    for start = 1,train_data:size(),opt.batchSize do
       local stop = math.min(start+opt.batchSize-1,train_data:size())
       -- disp progress
-      xlua.progress(t, train_data:size())
+      xlua.progress(start, train_data:size())
 
       -- create mini batch
       local indices = shuffle:sub(start,stop):long()
@@ -97,7 +122,11 @@ function train()
            -- estimate df/do (o is for outputs), a tensor
            local df_do = criterion:backward(outputs, targets)
            model:backward(inputs, df_do)
-
+            
+           --[[measure error]]--
+           -- update confusion
+           confusion:batchAdd(outputs, targets)
+                          
            -- return f and df/dX
            return f,gradParameters
         end
@@ -107,11 +136,8 @@ function train()
 
    -- time taken
    time = sys.clock() - time
-   time = time / trainData:size()
+   time = time / train_data:size()
    print("\n==> time to learn 1 sample = " .. (time*1000) .. 'ms')
-
-   -- print confusion matrix
-   print(confusion)
 
    -- update logger/plot
    trainLogger:add{['% mean class accuracy (train set)'] = confusion.totalValid * 100}
@@ -129,4 +155,58 @@ function train()
    -- next epoch
    confusion:zero()
    epoch = epoch + 1
+end
+
+
+-- test function
+function test()
+   -- local vars
+   local time = sys.clock()
+
+   -- averaged param use?
+   if average then
+      cachedparams = parameters:clone()
+      parameters:copy(average)
+   end
+
+   -- test over test data
+   print('==> testing on test set:')
+   for t = 1,testData:size() do
+      -- disp progress
+      xlua.progress(t, testData:size())
+
+      -- get new sample
+      local input = testData.data[t]
+      if opt.type == 'double' then input = input:double()
+      elseif opt.type == 'cuda' then input = input:cuda() end
+      local target = testData.labels[t]
+
+      -- test sample
+      local pred = model:forward(input)
+      confusion:add(pred, target)
+   end
+
+   -- timing
+   time = sys.clock() - time
+   time = time / testData:size()
+   print("\n==> time to test 1 sample = " .. (time*1000) .. 'ms')
+
+   -- print confusion matrix
+   print(confusion)
+
+   -- update log/plot
+   testLogger:add{['% mean class accuracy (test set)'] = confusion.totalValid * 100}
+   if opt.plot then
+      testLogger:style{['% mean class accuracy (test set)'] = '-'}
+      testLogger:plot()
+   end
+
+   -- averaged param use?
+   if average then
+      -- restore parameters
+      parameters:copy(cachedparams)
+   end
+   
+   -- next iteration:
+   confusion:zero()
 end

@@ -139,6 +139,9 @@ function train()
    time = time / train_data:size()
    print("\n==> time to learn 1 sample = " .. (time*1000) .. 'ms')
 
+   -- print confusion matrix
+   print(confusion)
+   
    -- update logger/plot
    trainLogger:add{['% mean class accuracy (train set)'] = confusion.totalValid * 100}
    if opt.plot then
@@ -157,6 +160,9 @@ function train()
    epoch = epoch + 1
 end
 
+train()
+
+--[[
 
 -- test function
 function test()
@@ -209,4 +215,4 @@ function test()
    
    -- next iteration:
    confusion:zero()
-end
+end]]--

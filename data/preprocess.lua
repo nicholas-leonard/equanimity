@@ -8,7 +8,7 @@ require 'xlua'
 -- TODO : 
 --- Preprocessor.__init should have a switch to determine if it is
 --- to be applied to inputs, targets or both. Default is inputs only.
---- Unit tests. Start with standardize.
+--- Unit tests. Start with standardize
 ------------------------------------------------------------------------
 
 --[[

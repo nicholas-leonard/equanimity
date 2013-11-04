@@ -1,12 +1,6 @@
-require 'fn'
-require 'fn/seq'
-require 'util/arg'
-require 'dataset'
-require 'dataset/pipeline'
-require 'dataset/whitening'
-require 'pprint'
+require 'torch'
+require 'xlua'
 
-local arg = util.arg
 
 local Dataset = torch.class("data.Dataset")
 
@@ -33,9 +27,41 @@ Eliminate non-standard dependencies
 --   metadata = { name = 'random', classes = {1,2,3,4,5,6,7,8,9,10} }
 --   dataset = Dataset(data_table, metadata)
 --
-function Dataset:__init(data_table, global_metadata)
-
-   self.dataset = data_table
+function Dataset:__init()
+   local args
+   args, self.inputs, self.targets, self.topological, self.axes, 
+         self.view_converter
+      = xlua.unpack(
+      {...},
+      'Dataset constructor', nil,
+      {arg='inputs', type='table', 
+       help=[[Inputs of the dataset taking the form of torch.Tensor with
+            2 dimensions, or more if topological is true. Alternatively,
+            inputs may take the form of a table of such torch.Tensors.
+            The first dimension of the torch.Tensor(s) should be of size
+            number of examples.
+            ]], req=true},
+      {arg='targets', type='table', 
+       help=[[Targets of the dataset taking the form of torch.Tensor
+            with 1-2 dimensions. Alternatively, targets may take the 
+            form of a table of such torch.Tensors. The first dimension 
+            of the torch.Tensor(s) should be of size number of examples.
+            ]], default=nil},
+      {arg='topological', type='boolean', 
+       help=[[This should be true if the provided inputs are topological
+            ]], default=nil},
+      {arg='axes', type='table', 
+       help=[[A table defining the order and nature of each dimension
+            of a batch of images. An example would be {'b', 0, 1,'c'}, 
+            where the dimensions represent a batch of examples :'b', 
+            the first horizontal axis of the image : 0, the vertical 
+            axis : 1, and the color channels : 'c'.
+            ]], default={'b','x','y','c'}},
+   )
+   
+   inputs, targets, axes, topo_view, 
+   self.inputs = inputs
+   self.targets = targets
 
    global_metadata = global_metadata or {}
 

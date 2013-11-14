@@ -14,7 +14,7 @@ require 'os'
 --typepattern(3, pattern)
 function typepattern(obj, pattern)
    local class = type(obj)
-   if class ~= 'userdata' then
+   if class == 'userdata' then
       class = torch.typename(obj)
    end
    local match = string.match(class, pattern)

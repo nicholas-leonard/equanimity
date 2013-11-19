@@ -5,6 +5,7 @@ require 'xlua'
 require 'fs'
 require 'paths'
 require 'os'
+require 'sys'
 
 --useful for validating if an object is an instance of a class, 
 --even when the class is a super class.

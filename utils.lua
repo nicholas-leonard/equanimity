@@ -5,6 +5,7 @@ require 'xlua'
 require 'fs'
 require 'paths'
 require 'os'
+require 'sys'
 
 --useful for validating if an object is an instance of a class, 
 --even when the class is a super class.
@@ -14,7 +15,7 @@ require 'os'
 --typepattern(3, pattern)
 function typepattern(obj, pattern)
    local class = type(obj)
-   if class ~= 'userdata' then
+   if class == 'userdata' then
       class = torch.typename(obj)
    end
    local match = string.match(class, pattern)

@@ -163,3 +163,25 @@ function decompress_file(path)
 end
 
 --[[ End From ]]--
+
+-- From http://stackoverflow.com/questions/1283388/lua-merge-tables
+function merge(t1, t2)
+    for k, v in pairs(t2) do
+        if (type(v) == "table") and (type(t1[k] or false) == "table") then
+            merge(t1[k], t2[k])
+        else
+            t1[k] = v
+        end
+    end
+    return t1
+end
+
+
+function constrain_norms(max_norm, axis, matrix)
+   local norms = torch.norm(weight,2,axis)
+   -- clip
+   local new_norms = norms:clone()
+   new_norms[torch.gt(norms, max_norm)] = max_norm
+   local div = torch.cdiv(new_norms, torch.add(norms,1e-7))
+   matrix:cmul(div:expandAs(matrix))
+end

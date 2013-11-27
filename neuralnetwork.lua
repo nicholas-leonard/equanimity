@@ -5,7 +5,7 @@ require 'nn'
 require 'paths'
 
 require 'equanimity/optim/ConfusionMatrix'
-require 'dataset/mnist'
+require 'DataSet/mnist'
 
 --[[parse command line arguments]]--
 cmd = torch.CmdLine()
@@ -44,10 +44,10 @@ if opt.type == 'cuda' then
    torch.setdefaulttensortype('torch.CudaTensor')
 end
 
---[[Load datasets]]--
-train_data = dataset.Mnist{which_set='train'}
-valid_data = dataset.Mnist{which_set='valid'}
-test_data = dataset.Mnist{which_set='test'}
+--[[Load DataSets]]--
+train_data = DataSet.Mnist{which_set='train'}
+valid_data = DataSet.Mnist{which_set='valid'}
+test_data = DataSet.Mnist{which_set='test'}
 
 ninputs = train_data:n_dimensions()
 nhidden = opt.numHidden

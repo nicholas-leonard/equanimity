@@ -5,23 +5,25 @@ require 'nn'
 require 'paths'
 
 --[[parse command line arguments]]--
---[[
+
 cmd = torch.CmdLine()
 cmd:text()
 cmd:text('MNIST MLP Training/Optimization')
-cmd:text()
+cmd:text('Example:')
+cmd:text('th neuralnetwork_example.lua --batchSize 128 --momentum 0.5')
 cmd:text('Options:')
-cmd:option('-learningRate', 1e-3, 'learning rate at t=0')
-cmd:option('-batchSize', 1, 'mini-batch size (1 = pure stochastic)')
-cmd:option('-weightDecay', 0, 'weight decay')
-cmd:option('-momentum', 0, 'momentum')
-cmd:option('-numHidden', 200, 'number of hidden units')
-cmd:option('-batchSize', 32, 'number of examples per batch')
-cmd:option('-type', 'double', 'type: double | float | cuda')
-cmd:option('-save', 'results', 'subdirectory to save/log experiments in')
-cmd:option('-plot', false, 'live plot')
+cmd:option('--learningRate', 0.1, 'learning rate at t=0')
+cmd:option('--maxOutNorm', 1, 'max norm each layers output neuron weights')
+cmd:option('--momentum', 0, 'momentum')
+cmd:option('--numHidden', 200, 'number of hidden units')
+cmd:option('--batchSize', 32, 'number of examples per batch')
+cmd:option('--type', 'double', 'type: double | float | cuda')
+cmd:option('--maxEpoch', 100, 'maximum number of epochs to run')
+cmd:option('--maxTries', 30, 'maximum number of epochs to try to find a better local minima for early-stopping')
 cmd:text()
-opt = cmd:parse(arg or {})]]--
+opt = cmd:parse(arg or {})
+
+print(opt)
 
 --[[Expert ID generator]]--
 id_gen = dp.EIDGenerator('mypc.pid')
@@ -31,9 +33,9 @@ datasource = dp.Mnist()
 
 --[[Model]]--
 mlp = dp.Sequential()
-mlp:add(dp.Linear{input_size=28*28, output_size=100})
+mlp:add(dp.Linear{input_size=datasource._feature_size, output_size=opt.numHidden})
 mlp:add(dp.Module(nn.Tanh()))
-mlp:add(dp.Module(nn.Linear(100, 10)))
+mlp:add(dp.Linear{input_size=opt.numHidden, output_size=#(datasource._classes)})
 mlp:add(dp.Module(nn.SoftMax()))
 
 --[[Propagators]]--
@@ -44,22 +46,21 @@ train = dp.Optimizer{
       dp.EarlyStopper{
          error_report = {'validator','feedback','confusion','accuracy'},
          maximize = true,
-         max_epochs = 5,
-         start_epoch = 1
+         max_epochs = opt.maxTries,
       }
    },
    visitor = { -- the ordering here is important:
-      dp.Momentum{momentum_factor=0.9},
+      dp.Momentum{momentum_factor=opt.momentum},
       dp.Learn{
-         learning_rate=0.1, 
+         learning_rate=opt.learningRate, 
          observer = dp.LearningRateSchedule{
             schedule={[30]=0.01, [60]=0.001}
          }
       },
-      dp.MaxNorm{max_out_norm=1}
+      dp.MaxNorm{max_out_norm=opt.maxOutNorm}
    },
    feedback = dp.Confusion(),
-   sampler = dp.ShuffleSampler{batch_size=128},
+   sampler = dp.ShuffleSampler{batch_size=opt.batchSize},
    progress = true
 }
 valid = dp.Evaluator{
@@ -79,7 +80,7 @@ xp = dp.Experiment{
    optimizer = train,
    validator = valid,
    tester = test,
-   max_epoch = 10
+   max_epoch = opt.maxEpoch
 }
 
 xp:run(datasource)

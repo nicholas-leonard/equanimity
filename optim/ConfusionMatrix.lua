@@ -13,6 +13,8 @@
 local ConfusionMatrix = torch.class('optim.ConfusionMatrix2', 'optim.ConfusionMatrix')
 
 function ConfusionMatrix:batchAdd(predictions, targets)
+   print(predictions, targets)
+   os.exit()
    local preds, targs, _
    if predictions:dim() == 1 then
       -- predictions is a vector of classes

@@ -23,48 +23,63 @@ cmd:option('-plot', false, 'live plot')
 cmd:text()
 opt = cmd:parse(arg or {})]]--
 
+--[[Expert ID generator]]--
+id_gen = dp.EIDGenerator('mypc.pid')
+
 --[[Load DataSource]]--
 datasource = dp.Mnist()
 
 --[[Model]]--
 mlp = dp.Sequential()
-mlp:add(dp.Linear{input_size=28*28, output_size=50})
+mlp:add(dp.Linear{input_size=28*28, output_size=100})
 mlp:add(dp.Module(nn.Tanh()))
-mlp:add(dp.Module(nn.Linear(50, 10)))
-mlp:add(dp.Module(nn.Softmax()))
+mlp:add(dp.Module(nn.Linear(100, 10)))
+mlp:add(dp.Module(nn.SoftMax()))
 
 --[[Propagators]]--
 train = dp.Optimizer{
    criterion = nn.ClassNLLCriterion(),
-   observer = {
-      dp.Logger(), 
-      dp.LearningRateSchedule{schedule={[30]=0.01, [60]=0.001}}
+   observer =  {
+      dp.Logger(),
+      dp.EarlyStopper{
+         error_report = {'validator','feedback','confusion','accuracy'},
+         maximize = true,
+         max_epochs = 5,
+         start_epoch = 1
+      }
    },
    visitor = { -- the ordering here is important:
       dp.Momentum{momentum_factor=0.9},
-      dp.Learn{learning_rate=0.1},
+      dp.Learn{
+         learning_rate=0.1, 
+         observer = dp.LearningRateSchedule{
+            schedule={[30]=0.01, [60]=0.001}
+         }
+      },
       dp.MaxNorm{max_out_norm=1}
-   }
+   },
+   feedback = dp.Confusion(),
+   sampler = dp.ShuffleSampler{batch_size=128},
+   progress = true
 }
 valid = dp.Evaluator{
    criterion = nn.ClassNLLCriterion(),
-   feedback = Confusion(),  
+   feedback = dp.Confusion(),  
    observer = dp.Logger()
 }
 test = dp.Evaluator{
    criterion = nn.ClassNLLCriterion(),
-   feedback = Confusion()
+   feedback = dp.Confusion()
 }
 
 --[[Experiment]]--
 xp = dp.Experiment{
+   id_gen = id_gen,
+   model = mlp,
    optimizer = train,
    validator = valid,
    tester = test,
-   observer = dp.EarlyStopper{
-      error_report = {'validator','feedback','confusion','accuracy'},
-      maximize = true
-   }
+   max_epoch = 10
 }
 
 xp:run(datasource)

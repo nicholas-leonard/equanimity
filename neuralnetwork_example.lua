@@ -10,7 +10,7 @@ cmd = torch.CmdLine()
 cmd:text()
 cmd:text('MNIST MLP Training/Optimization')
 cmd:text('Example:')
-cmd:text('th neuralnetwork_example.lua --batchSize 128 --momentum 0.5')
+cmd:text('$> th neuralnetwork_example.lua --batchSize 128 --momentum 0.5')
 cmd:text('Options:')
 cmd:option('--learningRate', 0.1, 'learning rate at t=0')
 cmd:option('--maxOutNorm', 1, 'max norm each layers output neuron weights')
@@ -36,7 +36,14 @@ mlp = dp.Sequential()
 mlp:add(dp.Linear{input_size=datasource._feature_size, output_size=opt.numHidden})
 mlp:add(dp.Module(nn.Tanh()))
 mlp:add(dp.Linear{input_size=opt.numHidden, output_size=#(datasource._classes)})
-mlp:add(dp.Module(nn.SoftMax()))
+mlp:add(dp.Module(nn.LogSoftMax()))
+
+--[[GPU or CPU]]--
+if opt.type == 'cuda' then
+   require 'cutorch'
+   require 'cunn'
+   mlp:cuda()
+end
 
 --[[Propagators]]--
 train = dp.Optimizer{
@@ -54,23 +61,25 @@ train = dp.Optimizer{
       dp.Learn{
          learning_rate=opt.learningRate, 
          observer = dp.LearningRateSchedule{
-            schedule={[30]=0.01, [60]=0.001}
+            schedule={[100]=0.01, [200]=0.001}
          }
       },
       dp.MaxNorm{max_out_norm=opt.maxOutNorm}
    },
    feedback = dp.Confusion(),
-   sampler = dp.ShuffleSampler{batch_size=opt.batchSize},
+   sampler = dp.ShuffleSampler{batch_size=opt.batchSize, sample_type=opt.type},
    progress = true
 }
 valid = dp.Evaluator{
    criterion = nn.ClassNLLCriterion(),
    feedback = dp.Confusion(),  
-   observer = dp.Logger()
+   observer = dp.Logger(),
+   sampler = dp.Sampler{sample_type=opt.type}
 }
 test = dp.Evaluator{
    criterion = nn.ClassNLLCriterion(),
-   feedback = dp.Confusion()
+   feedback = dp.Confusion(),
+   sampler = dp.Sampler{sample_type=opt.type}
 }
 
 --[[Experiment]]--

@@ -10,7 +10,7 @@ cmd = torch.CmdLine()
 cmd:text()
 cmd:text('MNIST MLP Training/Optimization')
 cmd:text('Example:')
-cmd:text('$> th neuralnetwork_example.lua --batchSize 128 --momentum 0.5')
+cmd:text('$> th neuralnetwork.lua --batchSize 128 --momentum 0.5')
 cmd:text('Options:')
 cmd:option('--learningRate', 0.1, 'learning rate at t=0')
 cmd:option('--maxOutNorm', 1, 'max norm each layers output neuron weights')
@@ -25,7 +25,7 @@ opt = cmd:parse(arg or {})
 
 print(opt)
 
---[[Expert ID generator]]--
+--[[Experiment ID generator]]--
 id_gen = dp.EIDGenerator('mypc.pid')
 
 --[[Load DataSource]]--

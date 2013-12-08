@@ -44,7 +44,7 @@ dist = {
       [false] = 0.5, [true] = 0.5
    },
    model_dept = dp.WeightedChoose{
-      [2] = 0.9, [3] = 0.05, [4] = 0.05
+      [2] = 0.9, [3] = 0.05, [4] = 10
    },
    model_width = dp.WeightedChoose{
       [128]=0.1, [256]=0.2, [512]=0.3, [1024]=0.3, [2048]=0.1

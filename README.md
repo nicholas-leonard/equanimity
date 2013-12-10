@@ -11,3 +11,7 @@ inspired by pylearn2.
 Required Rocks
 ==============
 luasql.postgres
+
+TODO
+====
+installation script for deep

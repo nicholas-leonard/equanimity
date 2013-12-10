@@ -58,9 +58,22 @@ dist = {
    }
 }
 
+-- you should have postgresql server/client installed
+-- A dp database schema should be set up with psql setup.sql
+-- The DEEP_PG_CONN environment variable should specify a connection 
+-- string like : 
+-- dbname='mydatabase'user='username'host='myhost.com'
+-- And your /home/username/.pg_pass file should specify your password 
+-- for that host, database, username : 
+-- myhost.com:5432:mydatabase:username:mypassword
+-- You should also chmod go-rwx ~/.pgpass so that other users 
+-- are unable to see your password.
+-- And then you can securily an easily connect to the database using :
+pg = dp.Postgres()
+
 hyperopt = dp.HyperOptimizer{
-   collection_name = 'hyperoptimization example 1',
-   id_gen = dp.EIDGenerator('mypc.process_id'),
+   collection_name = 'postgresql-backend hyperoptimization example 2',
+   id_gen = dp.PGEIDGenerator{pg=pg},
    hyperparam_sampler = dp.PriorSampler{name='MLP+Mnist:dist1', dist=dist},
    experiment_factory = dp.MLPFactory(),
    datasource_factory = dp.MnistFactory()

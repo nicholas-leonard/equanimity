@@ -48,14 +48,6 @@ end
 --[[Propagators]]--
 train = dp.Optimizer{
    criterion = nn.ClassNLLCriterion(),
-   observer =  {
-      dp.Logger(),
-      dp.EarlyStopper{
-         error_report = {'validator','feedback','confusion','accuracy'},
-         maximize = true,
-         max_epochs = opt.maxTries,
-      }
-   },
    visitor = { -- the ordering here is important:
       dp.Momentum{momentum_factor=opt.momentum},
       dp.Learn{
@@ -73,7 +65,6 @@ train = dp.Optimizer{
 valid = dp.Evaluator{
    criterion = nn.ClassNLLCriterion(),
    feedback = dp.Confusion(),  
-   observer = dp.Logger(),
    sampler = dp.Sampler{sample_type=opt.type}
 }
 test = dp.Evaluator{
@@ -89,6 +80,14 @@ xp = dp.Experiment{
    optimizer = train,
    validator = valid,
    tester = test,
+   observer = {
+      dp.FileLogger(),
+      dp.EarlyStopper{
+         error_report = {'validator','feedback','confusion','accuracy'},
+         maximize = true,
+         max_epochs = opt.maxTries
+      }
+   },
    max_epoch = opt.maxEpoch
 }
 

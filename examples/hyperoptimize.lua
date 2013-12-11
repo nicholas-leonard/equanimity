@@ -21,6 +21,9 @@ dist = {
    max_epoch = opt.maxEpoch,
    model_type = opt.type,
    datasource = 'mnist',
+   batch_size = dp.WeightedChoose{
+      [32]=10, [64]=7, [128]=5, [256]=4, [16]=3, [8]=2, [512]=1 
+   },
    learning_rate = dp.WeightedChoose{
       [0.5]=0.1, [0.1]=0.8, [0.05]=0.1, [0.01]=0.3, [0.001]=0.1
    },
@@ -58,12 +61,16 @@ dist = {
    }
 }
 
+local process_id = 'hostname.process_id'
+local logger = dp.FileLogger()
 hyperopt = dp.HyperOptimizer{
    collection_name = 'hyperoptimization example 1',
-   id_gen = dp.EIDGenerator('mypc.process_id'),
+   id_gen = dp.EIDGenerator(process_id),
    hyperparam_sampler = dp.PriorSampler{name='MLP+Mnist:dist1', dist=dist},
-   experiment_factory = dp.MLPFactory(),
-   datasource_factory = dp.MnistFactory()
+   experiment_factory = dp.MLPFactory{logger=logger},
+   datasource_factory = dp.MnistFactory(),
+   process_name = process_id,
+   logger = logger
 }
 
 hyperopt:run()

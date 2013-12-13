@@ -14,12 +14,11 @@ cmd:option('--pid', 0, 'identifies process on host. Only important that each pro
 cmd:option('--type', 'double', 'type: double | float | cuda')
 cmd:option('--maxEpoch', 100, 'maximum number of epochs to run')
 cmd:option('--maxTries', 30, 'maximum number of epochs to try to find a better local minima for early-stopping')
-cmd:option('--useDevice', nil, 'sets the device (GPU) to use for this hyperoptimization')
+cmd:option('--useDevice', 1, 'sets the device (GPU) to use for this hyperoptimization')
 cmd:text()
 opt = cmd:parse(arg or {})
 
-if opt.useDevice then
-   opt.type = 'cuda'
+if opt.useDevice and opt.type == 'cuda' then
    require "cutorch"
    cutorch.setDevice(opt.useDevice)
 end
@@ -85,10 +84,10 @@ dist = {
 local pg = dp.Postgres()
 
 local process_id = opt.hostname .. '.' .. opt.pid
-local logger = dp.PGLogger()
+local logger = dp.PGLogger{pg=pg}
 
 hyperopt = dp.HyperOptimizer{
-   collection_name = opt.collection_name,
+   collection_name = opt.collection,
    id_gen = dp.PGEIDGenerator{pg=pg},
    hyperparam_sampler = dp.PriorSampler{name='MLP+Mnist:dist1', dist=dist},
    experiment_factory = dp.PGMLPFactory{

@@ -1,17 +1,18 @@
-equanimity
-==========
+# equanimity #
 A distributed conditional computing experiment using neural 
 decision trees.
 
-deep
-====
+# deep #
+
 A deep learning framework based on the torch distribution and 
 inspired by pylearn2.
 
-Required Rocks
-==============
-luasql.postgres
+## Install ##
+sudo apt-get install libpq-dev
+sudo luarocks install luasql-postgres PGSQL_INCDIR=/usr/include/postgresql
+sudo luarocks install fs
+sudo luarocks install underscore
+sudo luarocks install nnx
 
-TODO
-====
+## TODO ##
 installation script for deep

@@ -6,13 +6,23 @@ cmd = torch.CmdLine()
 cmd:text()
 cmd:text('MNIST+MLP Hyperparameter Optimization')
 cmd:text('Example:')
-cmd:text('$> th hyperoptimize.lua --maxEpoch 10 --maxTries 5')
+cmd:text('$> th hyperoptimize.lua --maxEpoch 500 --maxTries 50 --collection "MnistMLP1" --hostname "myhost.mydomain.com" --pid 1')
 cmd:text('Options:')
+cmd:option('--collection', 'hyperoptimization example 1', 'identifies a collection of related experiments')
+cmd:option('--hostname', 'localhost', 'hostname for this host')
+cmd:option('--pid', 0, 'identifies process on host. Only important that each process on same host have different names')
 cmd:option('--type', 'double', 'type: double | float | cuda')
 cmd:option('--maxEpoch', 100, 'maximum number of epochs to run')
 cmd:option('--maxTries', 30, 'maximum number of epochs to try to find a better local minima for early-stopping')
+cmd:option('--useDevice', nil, 'sets the device (GPU) to use for this hyperoptimization')
 cmd:text()
 opt = cmd:parse(arg or {})
+
+if opt.useDevice then
+   opt.type = 'cuda'
+   require "cutorch"
+   cutorch.setDevice(opt.useDevice)
+end
 
 --[[ hyperparameter sampling distribution ]]--
 
@@ -47,7 +57,7 @@ dist = {
       [false] = 0.5, [true] = 0.5
    },
    model_dept = dp.WeightedChoose{
-      [2] = 0.9, [3] = 0.05, [4] = 10
+      [2] = 0.9, [3] = 0.05, [4] = 0.05
    },
    model_width = dp.WeightedChoose{
       [128]=0.1, [256]=0.2, [512]=0.3, [1024]=0.3, [2048]=0.1
@@ -61,10 +71,11 @@ dist = {
    }
 }
 
-local process_id = 'hostname.process_id'
+local process_id = opt.hostname .. '.' .. opt.pid
+
 local logger = dp.FileLogger()
 hyperopt = dp.HyperOptimizer{
-   collection_name = 'hyperoptimization example 1',
+   collection_name = opt.collection,
    id_gen = dp.EIDGenerator(process_id),
    hyperparam_sampler = dp.PriorSampler{name='MLP+Mnist:dist1', dist=dist},
    experiment_factory = dp.MLPFactory{logger=logger},

@@ -10,7 +10,7 @@ cmd = torch.CmdLine()
 cmd:text()
 cmd:text('MNIST MLP Training/Optimization')
 cmd:text('Example:')
-cmd:text('$> th neuralnetwork_example.lua --batchSize 128 --momentum 0.5')
+cmd:text('$> th neuralnetwork.lua --batchSize 128 --momentum 0.5')
 cmd:text('Options:')
 cmd:option('--learningRate', 0.1, 'learning rate at t=0')
 cmd:option('--maxOutNorm', 1, 'max norm each layers output neuron weights')
@@ -25,7 +25,7 @@ opt = cmd:parse(arg or {})
 
 print(opt)
 
---[[Expert ID generator]]--
+--[[Experiment ID generator]]--
 id_gen = dp.EIDGenerator('mypc.pid')
 
 --[[Load DataSource]]--
@@ -48,14 +48,6 @@ end
 --[[Propagators]]--
 train = dp.Optimizer{
    criterion = nn.ClassNLLCriterion(),
-   observer =  {
-      dp.Logger(),
-      dp.EarlyStopper{
-         error_report = {'validator','feedback','confusion','accuracy'},
-         maximize = true,
-         max_epochs = opt.maxTries,
-      }
-   },
    visitor = { -- the ordering here is important:
       dp.Momentum{momentum_factor=opt.momentum},
       dp.Learn{
@@ -73,7 +65,6 @@ train = dp.Optimizer{
 valid = dp.Evaluator{
    criterion = nn.ClassNLLCriterion(),
    feedback = dp.Confusion(),  
-   observer = dp.Logger(),
    sampler = dp.Sampler{sample_type=opt.type}
 }
 test = dp.Evaluator{
@@ -89,6 +80,14 @@ xp = dp.Experiment{
    optimizer = train,
    validator = valid,
    tester = test,
+   observer = {
+      dp.FileLogger(),
+      dp.EarlyStopper{
+         error_report = {'validator','feedback','confusion','accuracy'},
+         maximize = true,
+         max_epochs = opt.maxTries
+      }
+   },
    max_epoch = opt.maxEpoch
 }
 

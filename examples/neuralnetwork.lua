@@ -20,6 +20,7 @@ cmd:option('--batchSize', 32, 'number of examples per batch')
 cmd:option('--type', 'double', 'type: double | float | cuda')
 cmd:option('--maxEpoch', 100, 'maximum number of epochs to run')
 cmd:option('--maxTries', 30, 'maximum number of epochs to try to find a better local minima for early-stopping')
+cmd:option('--dropout', false, 'apply dropout on hidden neurons, requires "nnx" luarock')
 cmd:text()
 opt = cmd:parse(arg or {})
 
@@ -32,11 +33,19 @@ id_gen = dp.EIDGenerator('mypc.pid')
 datasource = dp.Mnist()
 
 --[[Model]]--
+local dropout
+if opt.dropout then
+   require 'nnx'
+   dropout = nn.Dropout()
+end
 mlp = dp.Sequential()
-mlp:add(dp.Linear{input_size=datasource._feature_size, output_size=opt.numHidden})
-mlp:add(dp.Module(nn.Tanh()))
-mlp:add(dp.Linear{input_size=opt.numHidden, output_size=#(datasource._classes)})
-mlp:add(dp.Module(nn.LogSoftMax()))
+mlp:add(dp.Neural{input_size=datasource._feature_size, 
+                  output_size=opt.numHidden,
+                  transfer=nn.Tanh()})
+mlp:add(dp.Neural{input_size=opt.numHidden, 
+                  output_size=#(datasource._classes),
+                  transfer=nn.LogSoftMax(),
+                  dropout=dropout})
 
 --[[GPU or CPU]]--
 if opt.type == 'cuda' then
@@ -88,6 +97,7 @@ xp = dp.Experiment{
          max_epochs = opt.maxTries
       }
    },
+   random_seed = os.time(),
    max_epoch = opt.maxEpoch
 }
 

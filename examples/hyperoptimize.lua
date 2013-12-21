@@ -30,6 +30,7 @@ dist = {
    max_epoch = opt.maxEpoch,
    model_type = opt.type,
    datasource = 'mnist',
+   random_seed = dp.TimeChoose(),
    batch_size = dp.WeightedChoose{
       [32]=10, [64]=7, [128]=5, [256]=4, [16]=3, [8]=2, [512]=1 
    },
@@ -67,6 +68,9 @@ dist = {
    },
    activation = dp.WeightedChoose{
       ['Tanh'] = 0.4, ['ReLU'] = 0.5, ['Sigmoid'] = 0.1
+   },
+   dropout_probs = dp.WeightedChoose{
+      [{}] = 0.4, [{0.2,0.5,0.5,0.5}] = 0.2, [{nil,0.5,0.5,0.5}] = 0.5
    }
 }
 
@@ -76,7 +80,7 @@ local logger = dp.FileLogger()
 hyperopt = dp.HyperOptimizer{
    collection_name = opt.collection,
    id_gen = dp.EIDGenerator(process_id),
-   hyperparam_sampler = dp.PriorSampler{name='MLP+Mnist:dist1', dist=dist},
+   hyperparam_sampler = dp.PriorSampler{name='MLP+Mnist:dist2', dist=dist},
    experiment_factory = dp.MLPFactory{logger=logger},
    datasource_factory = dp.MnistFactory(),
    process_name = process_id,

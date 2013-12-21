@@ -70,7 +70,9 @@ dist = {
       ['Tanh'] = 0.4, ['ReLU'] = 0.5, ['Sigmoid'] = 0.1
    },
    dropout_probs = dp.WeightedChoose{
-      [{}] = 0.4, [{0.2,0.5,0.5,0.5}] = 0.2, [{nil,0.5,0.5,0.5}] = 0.5
+      [{false,false,false,false}] = 0.4, 
+      [{0.2,0.5,0.5,0.5}] = 0.2, 
+      [{false,0.5,0.5,0.5}] = 0.5
    }
 }
 

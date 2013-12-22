@@ -14,6 +14,7 @@ sudo luarocks install luasql-postgres PGSQL_INCDIR=/usr/include/postgresql
 sudo luarocks install fs
 sudo luarocks install underscore
 sudo luarocks install nnx
+sudo apt-get install liblapack-dev
 ```
 
 ## TODO ##

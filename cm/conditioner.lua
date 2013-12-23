@@ -2,10 +2,6 @@
 --[[ Conditioner ]]--
 ------------------------------------------------------------------------
 local Conditioner, parent = torch.class("dp.Conditioner", "dp.Optimizer")
-
-function Conditioner:__init()
-   
-end
       
 function Conditioner:propagateBatch(batch)   
    local model = self._model

@@ -1,6 +1,7 @@
 require 'dp'
 
-torch.include('dp', 'essrlcriterion.lua')
-torch.include('dp', 'equanimous.lua')
-torch.include('dp', 'swithnode.lua')
-torch.include('dp', 'conditioner.lua')
+torch.include('cm', 'essrlcriterion.lua')
+torch.include('cm', 'equanimous.lua')
+torch.include('cm', 'switchnode.lua')
+--torch.include('cm', 'switchlayer.lua')
+torch.include('cm', 'conditioner.lua')

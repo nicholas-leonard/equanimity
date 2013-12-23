@@ -9,7 +9,7 @@ SwitchNode.isSwitchNode = true
 
 function SwitchNode:__init(config)
    config = config or {}
-   local args, gater = xlua.unpack(
+   local args, gater, experts = xlua.unpack(
       {config},
       'SwitchNode', nil,
       {arg='gater', type='dp.Model'},
@@ -57,17 +57,12 @@ function SwitchNode:get(index)
 end
 
 
-function SwithLayer:forward(state)
-   local input = state.input
-   if input.act then 
-      state.input = {input}
-   end
-   parent.forward(self, state)
-end
-
 function SwitchNode:_forward(gstate)
+   local gater = self._gater
+   -- shallow copy to allow gater to compute its own grads
+   local gater_istate = table.copy(self.istate)
    -- forward gater to get routes
-   local gater_ostate = self._gater:forward{global=state}
+   local gater_ostate = gater:forward{input=gater_istate,global=gstate}
    -- routes is a matrix of indices
    local routes = gater_ostate.routes
    -- alphas is a matrix of rows that some to one and weight
@@ -84,10 +79,10 @@ function SwitchNode:_forward(gstate)
    -- accumulate example indices and alphas for each experts
    for example_idx = 1,routes:size(1) do
       for sample_idx = 1,routes:size(2) do
-         local expert_idx = routes{example_idx,sample_idx}
+         local expert_idx = routes[{example_idx,sample_idx}]
          local expert = experts[expert_idx] or {examples={}, alphas={}}
          table.insert(expert.examples, example_idx)
-         table.insert(expert.alphas, alphas{example_idx,expert_idx})
+         table.insert(expert.alphas, alphas[{example_idx,expert_idx}])
          experts[expert_idx] = expert
       end
    end   
@@ -97,13 +92,14 @@ function SwitchNode:_forward(gstate)
       if examples then
          -- create a tensor-batch examples for the expert
          local indices = torch.LongTensor(expert.examples)
-         expert_branch.istate = {
+         local expert_istate = {
             batch_indices = indices,
             act = input_act:index(1, indices),
             indices = input_indices:index(1, indices)
          }      
          -- forward batch and update i/o states
-         local expert_ostate = expert_branch:forward{global=gstate}
+         local expert_ostate 
+            = expert_branch:forward{input=expert_istate,global=gstate}
          -- save the alphas
          expert_ostate.alphas 
             = torch.DoubleTensor(expert.alphas):type(self:type())
@@ -198,13 +194,13 @@ end
 --[[ SwitchLayer ]]--
 ------------------------------------------------------------------------
 local SwitchLayer, parent = torch.class("dp.SwitchLayer", "dp.Container")
-TreeLayer.isTreeLayer
+SwitchLayer.isSwitchLayer = true
 
 function SwitchLayer:__init(config)
    config = config or {}
    local args, nodes = xlux.unpack(
       {config},
-      'SwitchLayer',nil,
+      'SwitchLayer', nil,
       {arg='nodes', type='table', req=true}
    )
    config.typename = 'switchlayer'
@@ -217,7 +213,7 @@ function SwitchLayer:setup(config)
    
 end
 
-function SwithLayer:forward(state)
+function SwitchLayer:forward(state)
    local input = state.input
    if input.act then 
       state.input = {input}

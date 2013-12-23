@@ -4,9 +4,9 @@ require 'cm'
 
 cmd = torch.CmdLine()
 cmd:text()
-cmd:text('MNIST Conditional Model Training/Optimization')
+cmd:text('MNIST Neural Decision Tree Training/Optimization')
 cmd:text('Example:')
-cmd:text('$> th conditionalmodel.lua --batchSize 128 --momentum 0.5')
+cmd:text('$> th neuraldecisiontree.lua --batchSize 128 --momentum 0.5')
 cmd:text('Options:')
 cmd:option('--nEval', 2, 'number of experts chosen during evaluation')
 cmd:option('--nSample', 2, 'number of experts sampled during training')
@@ -22,7 +22,7 @@ cmd:option('--type', 'double', 'type: double | float | cuda')
 cmd:option('--maxEpoch', 100, 'maximum number of epochs to run')
 cmd:option('--maxTries', 30, 'maximum number of epochs to try to find a better local minima for early-stopping')
 cmd:option('--dropout', false, 'apply dropout on hidden neurons, requires "nnx" luarock')
-cmd:option('--nTrunkHidden', 0, 'if greater than zero, add a trunk dp.Neural layer before dp.SwitchLayer(s)'
+cmd:option('--nTrunkHidden', 0, 'if greater than zero, add a trunk dp.Neural layer before dp.SwitchLayer(s)')
 cmd:text()
 opt = cmd:parse(arg or {})
 
@@ -52,7 +52,7 @@ if opt.nTrunkHidden > 0 then
 end
 
 local experts = {}
-for i = 1,opt.numExpert do
+for i = 1,opt.nExpert do
    table.insert(experts, 
       dp.Neural{
          input_size=input_size,
@@ -70,12 +70,12 @@ local gater = dp.Sequential{
       },
       dp.Equanimous{
          input_size=opt.nGaterHidden,
-         output_size=opt.numExpert,
+         output_size=opt.nExpert,
          transfer=nn.Sigmoid(),
          n_test=opt.nTest
       }
    }
-)
+}
 ndt:add(dp.SwitchNode{gater=gater, experts=experts})
 
 --[[GPU or CPU]]--
@@ -88,8 +88,8 @@ end
 --[[Propagators]]--
 train = dp.Conditioner{
    criterion = nn.ESSRLCriterion{
-      n_reinforce=n_reinforce, 
-      n_sample=n_sample,
+      n_reinforce=opt.nReinforce, 
+      n_sample=opt.nSample,
       n_classes=#(datasource._classes)
    },
    visitor = { -- the ordering here is important:

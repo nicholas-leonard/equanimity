@@ -45,13 +45,12 @@ end
 
 function Equanimous:_forward(gstate)
    -- affine transform + transfer function
-   parent._forward(gstate)
-   -- sample n_train samples from a multinomial without replacement
-   local n_sample = gstate.n_sample or self._n_sample
-   self.ostate.routes 
-      = dp.multinomial_without_replacement(self.ostate.act, n_sample)
+   parent._forward(self, gstate)
+   -- sample n_sampe samples from a multinomial without replacement
+   local n_sample = self._n_sample
+   self.ostate.routes = dp.multinomial(self.ostate.act, n_sample, true)
    -- alphas will eventually be used to weigh a weighted mean of outputs
-   self.ostate.alphas = torch.add(self.ostate.act, -targets[1])
+   self.ostate.alphas = torch.add(self.ostate.act, -self._targets[1])
 end
 
 function Equanimous:_backward(gstate, scale)
@@ -60,7 +59,7 @@ function Equanimous:_backward(gstate, scale)
 end
 
 function Equanimous:_evaluate(gstate)
-   if self._evaluate_protocol = 'MAP' then
+   if self._evaluate_protocol == 'MAP' then
       self._evaluateMap(gstate)
    end
 end

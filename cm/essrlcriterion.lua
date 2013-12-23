@@ -34,8 +34,8 @@ function ESSRLCriterion:__init(config)
    self._type = type
 end
 
-function ESSRLCriterion:forward(istates, targets, indices)
-   assert(type(istates) == 'table')
+function ESSRLCriterion:forward(expert_ostates, targets, indices)
+   assert(type(expert_ostates) == 'table')
    assert(torch.isTensor(targets))
    assert(torch.isTensor(indices))
    local n_example = indices:size(1)
@@ -58,7 +58,7 @@ function ESSRLCriterion:forward(istates, targets, indices)
             local err = criterion:forward(act, targets[batch_idx])
             table.insert(example.experts, expert_idx)
             table.insert(example.acts, act)
-            table.insert(example.criteria = criterion)
+            table.insert(example.criteria, criterion)
             table.insert(example.errors, err)
             table.insert(example.alphas, expert_ostate.alphas[i])
             batch[batch_idx] = example
@@ -110,9 +110,9 @@ function ESSRLCriterion:forward(istates, targets, indices)
    local size = alphas:size():totable()
    size[3] = 1
    local outputs = torch.cmul(
-      alphas:reshape(unpack(size)):expandAs(win_input_acts), 
+      torch.reshape(alphas, unpack(size)):expandAs(win_input_acts), 
       win_input_acts
-   ):sum(3):reshape(alphas:size())
+   ):sum(2)[{{},1,{}}]
    -- measure error
    local criterion = self._criterion()
    local output_error = criterion:forward(outputs, targets)
@@ -123,7 +123,7 @@ end
 function ESSRLCriterion:backward(istates, targets, indices)
    for input_id, input_state in pairs(istates) do
       input_state.reinforce = {}
-      input_state.grad
+      input_state.grad = 0
    end
    -- compute gradients for the winning example-expert pairs
    for id, example in pairs(self._examples) do

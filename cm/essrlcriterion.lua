@@ -35,6 +35,7 @@ function ESSRLCriterion:__init(config)
 end
 
 function ESSRLCriterion:forward(expert_ostates, targets, indices)
+   print(expert_ostates)
    assert(type(expert_ostates) == 'table')
    assert(torch.isTensor(targets))
    assert(torch.isTensor(indices))
@@ -48,12 +49,11 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
    local batch = {}
    for expert_idx, expert_ostate in pairs(expert_ostates) do
       if type(expert_idx) == 'number' then
-         for i = 1, expert_ostate.indices:size(1) do
+         for i = 1, expert_ostate.batch_indices:size(1) do
             local batch_idx = expert_ostate.batch_indices[i]
-            local example_idx = expert_ostate.indices[i]
             local example = batch[batch_idx] 
-               or {experts={},acts={},errors={},criteria={},alphas={}}
-            local act = expert.ostate.act[{i,{}}]
+               or {experts={},acts={},errors={},criteria={},alphas={}}        
+            local act = expert_ostate.act[{i,{}}]
             local criterion = self._criterion()
             local err = criterion:forward(act, targets[batch_idx])
             table.insert(example.experts, expert_idx)
@@ -67,17 +67,22 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
    end
    for batch_idx, example in pairs(batch) do
       -- sort each example's experts by ascending error
-      local example_error, idxs = torch.DoubleTensor(example.errors):sort()
-      local example_acts = input_acts[{batch_idx, {}, {}}]
-      for sample_idx, acts in pairs(example.acts) do
-         local sample_acts = torch.DoubleTensor(acts)
-         example_acts[{sample_idx, {}}] = sample_acts:index(1, idxs)
+      local example_errors, idxs = torch.DoubleTensor(
+         example.errors
+      ):sort()
+      assert(example_errors:size(1) == self._n_sample)
+      local example_acts = torch.DoubleTensor(
+         #example.acts, self._n_classes
+      )
+      for sample_idx, sample_acts in pairs(example.acts) do
+         example_acts[{sample_idx, {}}] = sample_acts
       end
       local example_experts = torch.LongTensor(example.experts)
       local example_alphas = torch.DoubleTensor(example.alphas)
+      input_acts[{batch_idx, {}, {}}] = example_acts:index(1, idxs)
       input_experts[{batch_idx,{}}] = example_experts:index(1, idxs)
       input_alphas[{batch_idx,{}}] = example_alphas:index(1, idxs)
-      output_errors[{batch_idx,{}}] = example_error:index(1, idxs)
+      output_errors[{batch_idx,{}}] = example_errors:index(1, idxs)
    end
    -- For each example, reinforce winning experts (those that have 
    -- least error) by allowing them to learn and backward-propagating
@@ -107,6 +112,8 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       error"Unknown accumulator"
    end
    -- alpha-weighted mean of activations to get outputs
+   print(alphas)
+   print(alphas:sum(2):min(), alphas:sum(2):mean(), alphas:sum(2):max(), alphas:sum(2):std())
    local size = alphas:size():totable()
    size[3] = 1
    local outputs = torch.cmul(

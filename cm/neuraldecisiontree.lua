@@ -34,6 +34,7 @@ id_gen = dp.EIDGenerator('mypc.pid')
 
 --[[Load DataSource]]--
 datasource = dp.Mnist()
+local n_classes = #(datasource._classes)
 
 --[[Model]]--
 local input_size = datasource._feature_size
@@ -54,10 +55,19 @@ end
 local experts = {}
 for i = 1,opt.nExpert do
    table.insert(experts, 
-      dp.Neural{
-         input_size=input_size,
-         output_size=opt.nExpertHidden,
-         transfer=nn.Tanh()
+      dp.Sequential{
+         models = {
+            dp.Neural{
+               input_size=input_size,
+               output_size=opt.nExpertHidden,
+               transfer=nn.Tanh()
+            },
+            dp.Neural{
+               input_size=opt.nExpertHidden,
+               output_size=n_classes,
+               transfer=nn.LogSoftMax()
+            }
+         }
       }
    )
 end
@@ -72,7 +82,9 @@ local gater = dp.Sequential{
          input_size=opt.nGaterHidden,
          output_size=opt.nExpert,
          transfer=nn.Sigmoid(),
-         n_test=opt.nTest
+         n_sample=opt.nSample,
+         n_reinforce=opt.nReinforce,
+         n_eval=opt.nEval
       }
    }
 }
@@ -90,7 +102,7 @@ train = dp.Conditioner{
    criterion = nn.ESSRLCriterion{
       n_reinforce=opt.nReinforce, 
       n_sample=opt.nSample,
-      n_classes=#(datasource._classes)
+      n_classes=n_classes
    },
    visitor = { -- the ordering here is important:
       dp.Momentum{momentum_factor=opt.momentum},

@@ -8,16 +8,16 @@ function Conditioner:propagateBatch(batch)
    --[[ Phase 1 : Focus on examples ]]--
    --[[ feedforward ]]--
    -- evaluate function for complete mini batch
+   local batch_indices = torch.range(1,batch:nSample())
    local ostate = model:forward{
-      input={
-         act = batch:inputs(),
-         indices = batch:indices()
-      },
-      focus='examples'
+      input=batch:inputs(),
+      carry={batch_indices=batch_indices},
+      global={focus='examples'}
    }
    
-   local loss, outputs = 
-      self._criterion:forward(ostate, batch:targets(), batch:indices())
+   local loss, outputs = self._criterion:forward(
+      ostate, batch:targets(), batch_indices
+   )
    batch:setLoss(loss)  
    batch:setOutputs(outputs)
    

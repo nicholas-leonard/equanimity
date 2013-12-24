@@ -56,13 +56,14 @@ function SwitchNode:get(index)
    return self._experts[index]
 end
 
-
-function SwitchNode:_forward(gstate)
-   local gater = self._gater
-   -- shallow copy to allow gater to compute its own grads
-   local gater_istate = table.copy(self.istate)
+function SwitchNode:_forward(cstate)
    -- forward gater to get routes
-   local gater_ostate = gater:forward{input=gater_istate,global=gstate}
+   local gater_ostate = self._gater:forward{
+      -- shallow copy to allow gater to compute its own grads
+      input=table.copy(self.istate), 
+      global=self.gstate, 
+      carry=cstate
+   }
    -- routes is a matrix of indices
    local routes = gater_ostate.routes
    -- alphas is a matrix of rows that some to one and weight
@@ -72,8 +73,7 @@ function SwitchNode:_forward(gstate)
       alphas:cmul(self.istate.alphas)
    end
    local input_act = self.istate.act
-   local input_indices = self.istate.indices
-   local batch_indices = {}
+   self.istate.batch_indices = cstate.batch_indices
    local experts = {}
    -- TODO modify multinomial to return what the following loop returns
    -- accumulate example indices and alphas for each experts
@@ -86,28 +86,31 @@ function SwitchNode:_forward(gstate)
          experts[expert_idx] = expert
       end
    end   
-   self.ostate = {gater=gater_ostate}
+   --self.ostate = {gater=gater_ostate}
+   self.ostate = {}
    for expert_idx, expert_branch in ipairs(self._experts) do
       local expert = experts[expert_idx]
-      if examples then
+      if expert then
          -- create a tensor-batch examples for the expert
-         local indices = torch.LongTensor(expert.examples)
-         local expert_istate = {
-            batch_indices = indices,
-            act = input_act:index(1, indices),
-            indices = input_indices:index(1, indices)
-         }      
+         local expert_indices = torch.LongTensor(expert.examples) 
+         local expert_cstate = {
+            expert_indices=expert_indices,
+            batch_indices=cstate.batch_indices:index(1, expert_indices)
+         }
          -- forward batch and update i/o states
-         local expert_ostate 
-            = expert_branch:forward{input=expert_istate,global=gstate}
+         local expert_ostate, expert_cstate = expert_branch:forward{
+            input=input_act:index(1, expert_indices), 
+            global=self.gstate, 
+            carry=expert_cstate
+         }
          -- save the alphas
-         expert_ostate.alphas 
-            = torch.DoubleTensor(expert.alphas):type(self:type())
+         expert_ostate.alphas = torch.DoubleTensor(expert.alphas)
+         table.merge(expert_ostate, expert_cstate or {})
          self.ostate[expert_idx] = expert_ostate
       else
          -- is this really necessary?
-         expert.istate = {}
-         expert.ostate = {}
+         expert_branch.istate = {}
+         expert_branch.ostate = {}
       end
    end
 end
@@ -116,15 +119,14 @@ function SwitchNode:nExperts()
    return #self._experts
 end
 
-function SwitchNode:_evaluate(gstate)
-   local routes = self._gater:evaluate(gstate)
+function SwitchNode:_evaluate(cstate)
+   local routes = self._gater:evaluate(cstate)
    
 end
 
-function SwitchNode:_backward(gstate, scale)
-   scale = scale or 1
+function SwitchNode:_backward(cstate)
    -- backward gater to get routes
-   local gater_istate = self._gater:backward(gstate)
+   local gater_istate = self._gater:backward(cstate)
 end
 
 function SwitchNode:_accept(visitor)

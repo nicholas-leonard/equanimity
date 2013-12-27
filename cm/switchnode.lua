@@ -48,7 +48,7 @@ function SwitchNode:report()
    return report
 end
 
-function SwitchNode:size()
+function SwitchNode:nExperts()
    return #self._experts
 end
 
@@ -60,9 +60,7 @@ function SwitchNode:_forward(cstate)
    -- forward gater to get routes
    local gater_ostate = self._gater:forward{
       -- shallow copy to allow gater to compute its own grads
-      input=table.copy(self.istate), 
-      global=self.gstate, 
-      carry=cstate
+      input=table.copy(self.istate), global=self.gstate, carry=cstate
    }
    -- routes is a matrix of indices
    local routes = gater_ostate.routes
@@ -105,7 +103,7 @@ function SwitchNode:_forward(cstate)
          }
          -- save the alphas
          expert_ostate.alphas = torch.DoubleTensor(expert.alphas)
-         table.merge(expert_ostate, expert_cstate or {})
+         table.merge(expert_ostate, expert_cstate)
          self.ostate[expert_idx] = expert_ostate
       else
          -- is this really necessary?
@@ -115,18 +113,50 @@ function SwitchNode:_forward(cstate)
    end
 end
 
-function SwitchNode:nExperts()
-   return #self._experts
+function SwitchNode:_backward(cstates)
+   local istate = {}
+   local reinforce_indices = {}
+   local input_grad = self.istate.act:clone():zero()
+   local expert_grad = input_grad:clone()
+   for expert_idx, expert_cstate in pairs(cstates) do
+      local expert_branch = self._experts[expert_idx]
+      -- the indices of examples in the original node input batch
+      local expert_indices = expert_branch.ostate.expert_indices
+      local expert_ostate = self.ostate[expert_idx]
+      -- indices of the input to the switch_node to reinforce
+      if not _.isEmpty(expert_cstate.reinforce_indices) then
+         reinforce_indices[expert_idx] = expert_indices:index(
+            1, torch.LongTensor(expert_cstate.reinforce_indices)
+         )
+      end
+      local expert_istate = expert_branch:backward{
+         output=expert_ostate, global=self.global,
+         carry=cstates[expert_idx]
+      }
+      expert_grad:zero()
+      -- TODO :
+      -- compare speed of this to alternative (copy into expert igrad)
+      expert_grad:indexCopy(1, expert_indices, expert_istate.grad)
+      -- accumulate input gradients from experts by addition
+      input_grad:add(expert_grad)
+   end 
+   --[[ gater ]]--
+   -- backward gater to get routes
+   self._gater.ostate.reinforce_indices = reinforce_indices
+   local gater_istate = self._gater:backward{global=self.global}
+   input_grad:add(gater_istate.grad)
+   self.istate.grad = input_grad
+   -- prepare reinforce indices for the next layer
+   local cstate = {
+      batch_indices = self.istate.batch_indices,
+      reinforce_indices = _.uniq(_.concat(unpack(reinforce_indices)))
+   }
+   return cstate
 end
 
 function SwitchNode:_evaluate(cstate)
    local routes = self._gater:evaluate(cstate)
    
-end
-
-function SwitchNode:_backward(cstate)
-   -- backward gater to get routes
-   local gater_istate = self._gater:backward(cstate)
 end
 
 function SwitchNode:_accept(visitor)
@@ -190,53 +220,4 @@ function SwitchNode:__tostring__()
    end
    str = str .. line .. '}'
    return str
-end
-
-------------------------------------------------------------------------
---[[ SwitchLayer ]]--
-------------------------------------------------------------------------
-local SwitchLayer, parent = torch.class("dp.SwitchLayer", "dp.Container")
-SwitchLayer.isSwitchLayer = true
-
-function SwitchLayer:__init(config)
-   config = config or {}
-   local args, nodes = xlux.unpack(
-      {config},
-      'SwitchLayer', nil,
-      {arg='nodes', type='table', req=true}
-   )
-   config.typename = 'switchlayer'
-   parent.__init(self, config)
-   self._nodes = nodes
-   self._models = nodes
-end
-
-function SwitchLayer:setup(config)
-   
-end
-
-function SwitchLayer:forward(state)
-   local input = state.input
-   if input.act then 
-      state.input = {input}
-   end
-   parent.forward(self, state)
-end
-
-function SwitchLayer:_forward(gstate)
-   self.ostate = {}
-   -- Concatenate node output states into this layer's ostate.
-   -- This abstract the tree structure from the next layer.
-   -- Note that not all node branches (experts) will have ostates.
-   for input_idx,node_istate in pairs(self.istate) do
-      local node = self._nodes[input_idx]
-      local nExperts = node:nExperts()
-      for output_idx,node_ostate in pairs(node:forward(node_istate)) do
-         self.ostate[(input_idx-1)*nExperts + output_idx] = node_ostate
-      end
-   end
-end
-
-function SwitchLayer:_backward(gstate)
-
 end

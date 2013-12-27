@@ -37,15 +37,16 @@ function Equanimous:__init(config)
    self._n_eval = n_eval
    self._targets = targets
    self._epsilon = epsilon
+   self._criterion = nn.MSECriterion()
 end
 
 function Equanimous:setup(config)
    parent.setup(self, config)
 end   
 
-function Equanimous:_forward(gstate)
+function Equanimous:_forward(cstate)
    -- affine transform + transfer function
-   parent._forward(self, gstate)
+   parent._forward(self, cstate)
    -- sample n_sampe samples from a multinomial without replacement
    local n_sample = self._n_sample
    self.ostate.routes = dp.multinomial(self.ostate.act, n_sample, true)
@@ -53,12 +54,18 @@ function Equanimous:_forward(gstate)
    self.ostate.alphas = torch.add(self.ostate.act, -self._targets[1])
 end
 
-function Equanimous:_backward(gstate, scale)
-   local reinforce = self.ostate.reinforce
-   
+function Equanimous:_backward(cstate, scale)
+   local targets = self.ostate.act:clone():fill(self._targets[1])
+   -- TODO :
+   -- compare to alternative iteration over examples (batch_idx)
+   for expert_idx, reinforce in pairs(self.ostate.reinforce_indices) do
+      targets[{{},expert_idx}]:indexFill(1, reinforce, self._targets[2])
+   end
+   self.ostate.grad = self._criterion:backward(self.ostate.act, targets)
+   parent._backward(self, cstate)
 end
 
-function Equanimous:_evaluate(gstate)
+function Equanimous:_evaluate(cstate)
    if self._evaluate_protocol == 'MAP' then
       self._evaluateMap(gstate)
    end

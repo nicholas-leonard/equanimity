@@ -35,7 +35,7 @@ function ESSRLCriterion:__init(config)
 end
 
 function ESSRLCriterion:forward(expert_ostates, targets, indices)
-   print(expert_ostates)
+   --print(expert_ostates)
    assert(type(expert_ostates) == 'table')
    assert(torch.isTensor(targets))
    assert(torch.isTensor(indices))
@@ -45,14 +45,17 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
    local size = {n_example, self._n_sample}
    local input_experts = torch.LongTensor(unpack(size))
    local input_alphas = torch.DoubleTensor(unpack(size))
+   local input_origins = torch.LongTensor(unpack(size))
    local output_errors = torch.DoubleTensor(unpack(size))
    local batch = {}
    for expert_idx, expert_ostate in pairs(expert_ostates) do
       if type(expert_idx) == 'number' then
          for i = 1, expert_ostate.batch_indices:size(1) do
             local batch_idx = expert_ostate.batch_indices[i]
-            local example = batch[batch_idx] 
-               or {experts={},acts={},errors={},criteria={},alphas={}}        
+            local example = batch[batch_idx] or {
+               experts={}, acts={}, errors={},
+               criteria={}, alphas={}, origins={}
+            }        
             local act = expert_ostate.act[{i,{}}]
             local criterion = self._criterion()
             local err = criterion:forward(act, targets[batch_idx])
@@ -61,6 +64,7 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
             table.insert(example.criteria, criterion)
             table.insert(example.errors, err)
             table.insert(example.alphas, expert_ostate.alphas[i])
+            table.insert(example.origins, i)
             batch[batch_idx] = example
          end
       end
@@ -79,10 +83,21 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       end
       local example_experts = torch.LongTensor(example.experts)
       local example_alphas = torch.DoubleTensor(example.alphas)
+      local example_origins = torch.LongTensor(example.origins)
       input_acts[{batch_idx, {}, {}}] = example_acts:index(1, idxs)
       input_experts[{batch_idx,{}}] = example_experts:index(1, idxs)
       input_alphas[{batch_idx,{}}] = example_alphas:index(1, idxs)
+      input_origins[{batch_idx,{}}] = example_origins:index(1, idxs)
       output_errors[{batch_idx,{}}] = example_errors:index(1, idxs)
+      -- reorder criteria and keep only winning for backward pass
+      local criteria = {}
+      for sample_idx = 1,input_experts:size(2) do
+         if sample_idx > self._n_reinforce then
+            break
+         end
+         table.insert(criteria, example.criteria[idxs[sample_idx]])
+      end
+      example.win_criteria = criteria
    end
    -- For each example, reinforce winning experts (those that have 
    -- least error) by allowing them to learn and backward-propagating
@@ -112,8 +127,6 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       error"Unknown accumulator"
    end
    -- alpha-weighted mean of activations to get outputs
-   print(alphas)
-   print(alphas:sum(2):min(), alphas:sum(2):mean(), alphas:sum(2):max(), alphas:sum(2):std())
    local size = alphas:size():totable()
    size[3] = 1
    local outputs = torch.cmul(
@@ -123,27 +136,72 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
    -- measure error
    local criterion = self._criterion()
    local output_error = criterion:forward(outputs, targets)
+   -- store for backward pass
+   self._input_acts = input_acts
+   self._input_experts = input_experts
+   self._input_alphas = alphas
+   self._input_origins = input_origins
+   self._output_errors = output_errors
+   self._win_input_experts = win_input_experts
+   self._batch = batch
    return output_error, outputs
 end
 
 
-function ESSRLCriterion:backward(istates, targets, indices)
-   for input_id, input_state in pairs(istates) do
-      input_state.reinforce = {}
-      input_state.grad = 0
-   end
-   -- compute gradients for the winning example-expert pairs
-   for id, example in pairs(self._examples) do
-      for i, winner in ipairs(example.winners) do
-         table.insert(istates[winner.id].reinforce, winner.id)
+function ESSRLCriterion:backward(expert_ostates, targets, indices)
+   --regroup by experts
+   local experts = {}
+   for batch_idx = 1,self._input_experts:size(1) do
+      local example = self._batch[batch_idx]
+      for sample_idx = 1,self._input_experts:size(2) do
+         local expert_idx = self._input_experts[{batch_idx,sample_idx}]
+         local origin_idx = self._input_origins[{batch_idx,sample_idx}]
+         local expert = experts[expert_idx] or {
+            reinforce={}, grads={}, origins={}
+         }
+         table.insert(expert.origins, origin_idx)
+         -- non-reinforce expert-example pairs have no grad (dont learn)
+         local grad = false
+         if sample_idx <= self._n_reinforce then
+            local criterion = example.criteria[sample_idx]
+            local act = self._input_acts:select(1,batch_idx):select(
+               1, sample_idx
+            )
+            -- backprop through criterion
+            grad = criterion:backward(act, targets[batch_idx])
+            table.insert(expert.reinforce, origin_idx)
+         end
+         table.insert(expert.grads, grad)
+         experts[expert_idx] = expert
       end
    end
+   local cstates = {}
+   for expert_idx, expert_ostate in pairs(expert_ostates) do
+      local expert = experts[expert_idx]
+      -- reorder to original order of examples in batch
+      local idxs = torch.LongTensor(expert.origins)
+      --local reinforce_indices = reinforce:clone()
+      --reinforce_indices:indexCopy(1, idxs, reinforce)
+      cstates[expert_idx] = {
+         batch_indices = expert_ostate.batch_indices,
+         reinforce_indices = expert.reinforce
+      }
+      local grad = expert_ostate.act:clone():zero()
+      for batch_idx, example_grad in ipairs(expert.grads) do
+         if example_grad then
+            grad[{{batch_idx},{}}] = example_grad 
+         end
+      end
+      --local grad = grad:type(expert_ostate.acts:type())
+      expert_ostate.grad = grad:clone()
+      expert_ostate.grad:indexCopy(1, idxs, grad)
+   end
+   return expert_ostates, cstates
 end
 
 function ESSRLCriterion:evaluate(istates, targets, indices)
    
 end
-
 
 function ESSRLCriterion:clone()
    local f = torch.MemoryFile("rw"):binary()

@@ -9,14 +9,14 @@ function Conditioner:propagateBatch(batch)
    --[[ feedforward ]]--
    -- evaluate function for complete mini batch
    local batch_indices = torch.range(1,batch:nSample())
-   local ostate = model:forward{
+   local ostates = model:forward{
       input=batch:inputs(),
       carry={batch_indices=batch_indices},
       global={focus='examples'}
    }
    
    local loss, outputs = self._criterion:forward(
-      ostate, batch:targets(), batch_indices
+      ostates, batch:targets(), batch_indices
    )
    batch:setLoss(loss)  
    batch:setOutputs(outputs)
@@ -31,12 +31,17 @@ function Conditioner:propagateBatch(batch)
    self._mediator:publish(self:id():name() .. ':' .. "doneFeedback", 
                           self:report(), batch)
    
+   --[[ backpropagate ]]--
+   local istates, cstates = self._criterion:backward(
+      ostates, batch:targets(), batch:indices()
+   )
+   model:backward{
+      output=istates, 
+      carry=cstates,
+      global={focus='examples'}
+   }
    print("END TEST")
    os.exit()
-   --[[ backpropagate ]]--
-   self._criterion:backward(ostate, batch:targets(), batch:indices())
-   model:backward{output=batch:outputGradients()}
-
    
    --[[ update parameters ]]--
    model:accept(self._visitor)

@@ -2,19 +2,23 @@
 --[[ ESSRLCriterion ]]--
 -- Equanimous Sparse Supervised Reinforcement Learning
 -- takes a table of tables as input.
--- TODO : build as container or model?
+-- TODO : 
+-- build as container or model?
+-- statistics : Reinit after epoch, gen report
+--- distribution of error in experts
 ------------------------------------------------------------------------
 local ESSRLCriterion, parent = torch.class("nn.ESSRLCriterion")
 
 function ESSRLCriterion:__init(config)
    config = config or {}
-   local args, n_sample, n_reinforce, n_eval, n_classes, criterion,
-         accumulator
-      = xlua.unpack(
+   local args, n_sample, n_leaf, n_reinforce, n_eval, n_classes, 
+         criterion, accumulator = xlua.unpack(
       {config},
       'ESSRLCriterion', nil,
       {arg='n_sample', type='number', 
        help='number of experts sampled per example during training.'},
+      {arg='n_leaf', type='number',
+       help='number of  leaf experts in the neural decision tree'},
       {arg='n_reinforce', type='number', 
        help='number of experts reinforced per example during training.'},
       {arg='n_eval', type='number', 
@@ -28,10 +32,24 @@ function ESSRLCriterion:__init(config)
    self._criterion = criterion
    self._n_reinforce = n_reinforce
    self._n_sample = n_sample
+   self._n_leaf = n_leaf
    self._n_eval = n_eval
    self._n_classes = n_classes
    self._accumulator = accumulator
-   self._type = type
+   -- statistics :
+   --- monopoly : 
+   ---- distribution of examples to experts
+   self._reinforce_dist = torch.DoubleTensor(self._n_leaf)
+   self._sample_dist = torch.DoubleTensor(self._n_leaf)
+   ---- mean, standard deviation, min, max
+   self._reinforce_stats = {}
+   self._sample_stats = {}
+   self:resetStatistics()
+end
+
+function ESSRLCriterion:resetStatistics()
+   self._reinforce_dist:zero()
+   self._sample_dist:zero()
 end
 
 function ESSRLCriterion:forward(expert_ostates, targets, indices)
@@ -50,6 +68,9 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
    local batch = {}
    for expert_idx, expert_ostate in pairs(expert_ostates) do
       if type(expert_idx) == 'number' then
+         -- gather statistics
+         self._sample_dist[expert_idx] 
+            = self._sample_dist[expert_idx] + expert_ostate.act:size(1)
          expert_ostate.act_double = expert_ostate.act:double()
          for i = 1, expert_ostate.batch_indices:size(1) do
             local batch_idx = expert_ostate.batch_indices[i]
@@ -109,7 +130,7 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
    local win_input_experts = input_experts[{{},{1,self._n_reinforce}}]
    local win_input_alphas = input_alphas[{{},{1,self._n_reinforce}}]
    local win_output_errors = output_errors[{{},{1,self._n_reinforce}}]
-   local alphas
+   --local alphas
    if self._accumulator == 'softmax' then
       -- normalize alphas using softmax
       alphas = torch.exp(win_input_alphas)
@@ -181,8 +202,9 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
       local expert = experts[expert_idx]
       -- reorder to original order of examples in batch
       local idxs = torch.LongTensor(expert.origins)
-      --local reinforce_indices = reinforce:clone()
-      --reinforce_indices:indexCopy(1, idxs, reinforce)
+      -- gather statistics
+      self._reinforce_dist[expert_idx] 
+         = self._reinforce_dist[expert_idx] + #expert.reinforce
       cstates[expert_idx] = {
          batch_indices = expert_ostate.batch_indices,
          reinforce_indices = expert.reinforce
@@ -230,4 +252,11 @@ function ESSRLCriterion:accumulatedOutputs()
    for id, example in pairs(self._examples) do
       
    end
+end
+
+function ESSRLCriterion:report()
+   return {
+      reinforce = dp.distReport(self._reinforce_dist, true),
+      sample = dp.distReport(self._sample_dist, true)
+   }
 end

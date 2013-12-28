@@ -67,7 +67,7 @@ function SwitchNode:_forward(cstate)
    -- routes is a matrix of indices
    local routes = gater_ostate.routes
    -- alphas is a matrix of rows that some to one and weight
-   local alphas = gater_ostate.alphas
+   local alphas = gater_ostate.alphas:clone()
    -- multiply these alphas by any previous alphas
    if self.istate.alphas then
       alphas:cmul(self.istate.alphas:resizeAs(alphas))
@@ -92,7 +92,6 @@ function SwitchNode:_forward(cstate)
    for expert_idx, expert_branch in ipairs(self._experts) do
       local expert = experts[expert_idx]
       if expert then
-         -- create a tensor-batch examples for the expert
          local expert_indices = torch.LongTensor(expert.examples) 
          local expert_cstate = {
             expert_indices=expert_indices,
@@ -168,13 +167,6 @@ function SwitchNode:_evaluate(cstate)
    
 end
 
-function SwitchNode:_accept(visitor)
-   for i=1,#self._models do 
-      self._models[i]:accept(visitor)
-   end 
-   visitor:visitContainer(self)
-end
-
 function SwitchNode:zeroGradParameters()
   for i=1,#self._models do
      self._models[i]:zeroGradParameters()
@@ -199,4 +191,13 @@ end
 
 function SwitchNode:__tostring__()
    return 'dp.SwitchNode'
+end
+
+function SwitchNode:report()
+   -- merge reports
+   local report = {
+      experts={},
+      gater=self._gater:report()
+   }
+   return report
 end

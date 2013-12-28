@@ -1,5 +1,8 @@
 require 'cm'
 
+-- TODO :
+-- gater does more than one backward forward on reinforce targets
+
 --[[parse command line arguments]]--
 
 cmd = torch.CmdLine()
@@ -41,7 +44,7 @@ local n_classes = #(datasource._classes)
 --[[Model]]--
 local input_size = datasource._feature_size
 local n_nodes = 1
-print(n_nodes, ' X ', input_size)
+print(input_size..' pixels')
 -- neural decision tree
 ndt = dp.Sequential()
 -- add a trunk layer?
@@ -55,18 +58,21 @@ if opt.nTrunkHidden > 0 then
    )
    input_size = opt.nTrunkHidden
    hidden_size = opt.nTrunkHidden
-   print(n_nodes, ' X ', input_size)
+   print(n_nodes..' trunk with '..input_size..' hidden neurons')
 end
 
 for layer_idx = 1,opt.nSwitchLayer do
-   n_nodes = opt.nBranch^layer_idx
+   n_nodes = opt.nBranch^(layer_idx-1)
    local nodes = {}
    local expert_size = hidden_size/opt.nBranch^layer_idx
+   local gater_size = opt.nGaterHidden/opt.nBranch^(layer_idx-1)
    if layer_idx > 1 then
       expert_size = expert_size*opt.hiddenScale
    end
    expert_size = math.ceil(expert_size)
-   print(n_nodes, ' X ', expert_size)
+   gater_size = math.ceil(gater_size)
+   print(n_nodes*opt.nBranch..' experts with '..expert_size..' hidden neurons')
+   print(n_nodes..' gaters with '..gater_size..' hidden neurons')
    for node_idx = 1,n_nodes do
       local experts = {}
       for expert_idx = 1,opt.nBranch do
@@ -88,14 +94,15 @@ for layer_idx = 1,opt.nSwitchLayer do
          end
          table.insert(experts, expert)
       end
+      --[[ gater ]]--
       local gater = dp.Sequential{
          models = {
             dp.Neural{
-               input_size=input_size, output_size=opt.nGaterHidden,
+               input_size=input_size, output_size=gater_size,
                transfer=nn.Tanh()
             },
             dp.Equanimous{
-               input_size=opt.nGaterHidden, output_size=opt.nBranch,
+               input_size=gater_size, output_size=opt.nBranch,
                transfer=nn.Sigmoid(), n_sample=opt.nSample,
                n_reinforce=opt.nReinforce, n_eval=opt.nEval
             }
@@ -106,7 +113,7 @@ for layer_idx = 1,opt.nSwitchLayer do
    input_size = expert_size
    ndt:add(dp.SwitchLayer{nodes=nodes})
 end
-print(n_nodes, ' X ', n_classes)
+print(n_nodes*opt.nBranch..' leafs for '..n_classes..' classes')
 
 --[[GPU or CPU]]--
 if opt.type == 'cuda' then
@@ -117,17 +124,18 @@ end
 
 --[[Propagators]]--
 local n_output_sample = opt.nSample^opt.nSwitchLayer
+local n_leaf = opt.nBranch^opt.nSwitchLayer
 train = dp.Conditioner{
    criterion = nn.ESSRLCriterion{
       n_reinforce=opt.nReinforce, n_sample=n_output_sample,
-      n_classes=n_classes
+      n_classes=n_classes, n_leaf=n_leaf
    },
    visitor = { -- the ordering here is important:
       dp.Momentum{momentum_factor=opt.momentum},
       dp.Learn{
          learning_rate=opt.learningRate, 
          observer = dp.LearningRateSchedule{
-            schedule={[100]=0.01, [200]=0.001}
+            schedule={[10]=0.01, [40]=0.001}
          }
       },
       dp.MaxNorm{max_out_norm=opt.maxOutNorm}
@@ -139,7 +147,7 @@ train = dp.Conditioner{
 valid = dp.Shampoo{
    criterion = nn.ESSRLCriterion{
       n_reinforce=opt.nReinforce, n_sample=n_output_sample,
-      n_classes=n_classes
+      n_classes=n_classes, n_leaf=n_leaf
    },
    feedback = dp.Confusion(),  
    sampler = dp.Sampler{sample_type=opt.type}
@@ -147,7 +155,7 @@ valid = dp.Shampoo{
 test = dp.Shampoo{
    criterion = nn.ESSRLCriterion{
       n_reinforce=opt.nReinforce, n_sample=n_output_sample,
-      n_classes=n_classes
+      n_classes=n_classes, n_leaf=n_leaf
    },
    feedback = dp.Confusion(),
    sampler = dp.Sampler{sample_type=opt.type}

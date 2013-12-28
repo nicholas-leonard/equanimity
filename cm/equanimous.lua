@@ -38,6 +38,14 @@ function Equanimous:__init(config)
    self._targets = targets
    self._epsilon = epsilon
    self._criterion = nn.MSECriterion()
+   -- statistics :
+   --- sparsity : 
+   ---- distribution of alphas in bins
+   local n_bin = self._output_size
+   self._alpha_bins 
+      = torch.range(1,n_bin):double():div(n_bin):storage():totable()
+   self._alpha_dist = torch.DoubleTensor(n_bin)
+   self:zeroStatistics()
 end
 
 function Equanimous:setup(config)
@@ -47,16 +55,24 @@ end
 function Equanimous:_forward(cstate)
    -- affine transform + transfer function
    parent._forward(self, cstate)
-   -- sample n_sampe samples from a multinomial without replacement
-   local n_sample = self._n_sample
    self.ostate.act_double = self.ostate.act:double()
-   self.ostate.routes = dp.multinomial(
-      self.ostate.act_double, n_sample, true
-   )
-   -- alphas will eventually be used to weigh a weighted mean of outputs
-   self.ostate.alphas = torch.add(
+   -- alphas will eventually be used to weigh a mean of outputs
+   local alphas = torch.add(
       self.ostate.act_double, -self._targets[1]
    )
+   alphas:cdiv(alphas:sum(2):expandAs(alphas))
+   self.ostate.alphas = alphas
+   -- sample from a multinomial without replacement
+   self.ostate.routes = dp.multinomial(
+      self.ostate.alphas, self._n_sample, true
+   )
+   -- gather stats
+   local previous = 0
+   for i,upper in ipairs(self._alpha_bins) do
+      local current = torch.le(alphas,upper):double():sum()
+      self._alpha_dist[i] = self._alpha_dist[i] + current - previous
+      previous = current
+   end
 end
 
 function Equanimous:_backward(cstate, scale)
@@ -79,7 +95,20 @@ function Equanimous:_evaluate(cstate)
 end
 
 function Equanimous:report()
+   local dist_report = dp.distReport(self._alpha_dist)
+   dist_report.bins = self._alpha_bins
+   local dr = table.copy(dist_report)
+   dr.dist = table.tostring(dr.dist:storage():totable())
+   dr.bins = table.tostring(dr.bins)
+   dr.name = self:id():toString()
+   print(dr)
+   return {
+      alpha = dist_report
+   }
+end
 
+function Equanimous:zeroStatistics()
+   self._alpha_dist:zero()
 end
 
 function Equanimous:_evaluateMAP(gstate)

@@ -54,6 +54,18 @@ function Conditioner:propagateBatch(batch, report)
    --gstate = {focus='experts'}
 end
 
+function Conditioner:report()
+   local report = parent.report(self)
+   report.essrl = self._criterion:report()
+   print(report.essrl)
+   return report
+end
+
+function Conditioner:resetLoss()
+   parent.resetLoss(self)
+   self._criterion:resetStatistics()
+end
+
 ------------------------------------------------------------------------
 --[[ Shampoo ]]--
 ------------------------------------------------------------------------

@@ -50,13 +50,14 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
    local batch = {}
    for expert_idx, expert_ostate in pairs(expert_ostates) do
       if type(expert_idx) == 'number' then
+         expert_ostate.act_double = expert_ostate.act:double()
          for i = 1, expert_ostate.batch_indices:size(1) do
             local batch_idx = expert_ostate.batch_indices[i]
             local example = batch[batch_idx] or {
                experts={}, acts={}, errors={},
                criteria={}, alphas={}, origins={}
             }        
-            local act = expert_ostate.act[{i,{}}]
+            local act = expert_ostate.act_double[{i,{}}]
             local criterion = self._criterion()
             local err = criterion:forward(act, targets[batch_idx])
             table.insert(example.experts, expert_idx)
@@ -186,7 +187,7 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
          batch_indices = expert_ostate.batch_indices,
          reinforce_indices = expert.reinforce
       }
-      local grad = expert_ostate.act:clone():zero()
+      local grad = expert_ostate.act_double:clone():zero()
       for batch_idx, example_grad in ipairs(expert.grads) do
          if example_grad then
             grad[{{batch_idx},{}}] = example_grad 
@@ -195,6 +196,9 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
       --local grad = grad:type(expert_ostate.acts:type())
       expert_ostate.grad = grad:clone()
       expert_ostate.grad:indexCopy(1, idxs, grad)
+      expert_ostate.grad = expert_ostate.grad:type(
+         expert_ostate.act:type()
+      )
    end
    return expert_ostates, cstates
 end

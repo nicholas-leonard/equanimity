@@ -11,11 +11,13 @@ cmd:text('Options:')
 cmd:option('--nEval', 2, 'number of experts chosen during evaluation')
 cmd:option('--nSample', 2, 'number of experts sampled during training')
 cmd:option('--nReinforce', 1, 'number of experts reinforced during training')
-cmd:option('--nExpert', 8, 'number of expert branches in model')
+cmd:option('--nBranch', 8, 'number of expert branches per node')
+cmd:option('--nSwitchLayer', 1, 'number of switchlayers in the tree')
+cmd:option('--hiddenScale', 1.1, '')
 cmd:option('--learningRate', 0.1, 'learning rate at t=0')
 cmd:option('--maxOutNorm', 1, 'max norm each layers output neuron weights')
 cmd:option('--momentum', 0, 'momentum')
-cmd:option('--nExpertHidden', 100, 'number of hidden units per expert')
+cmd:option('--nBranchHidden', 100, 'number of hidden units per expert')
 cmd:option('--nGaterHidden', 200, 'number of hidden units per gater')
 cmd:option('--batchSize', 32, 'number of examples per batch')
 cmd:option('--type', 'double', 'type: double | float | cuda')
@@ -38,57 +40,73 @@ local n_classes = #(datasource._classes)
 
 --[[Model]]--
 local input_size = datasource._feature_size
+local n_nodes = 1
+print(n_nodes, ' X ', input_size)
 -- neural decision tree
 ndt = dp.Sequential()
 -- add a trunk layer?
+local hidden_size = opt.nBranchHidden
 if opt.nTrunkHidden > 0 then
    ndt:add(
       dp.Neural{
-         input_size=input_size,
-         output_size=opt.nTrunkHidden,
+         input_size=input_size, output_size=opt.nTrunkHidden,
          transfer=nn.Tanh()
       }
    )
    input_size = opt.nTrunkHidden
+   hidden_size = opt.nTrunkHidden
+   print(n_nodes, ' X ', input_size)
 end
 
-local experts = {}
-for i = 1,opt.nExpert do
-   table.insert(experts, 
-      dp.Sequential{
+for layer_idx = 1,opt.nSwitchLayer do
+   n_nodes = opt.nBranch^layer_idx
+   local nodes = {}
+   local expert_size = hidden_size/opt.nBranch^layer_idx
+   if layer_idx > 1 then
+      expert_size = expert_size*opt.hiddenScale
+   end
+   expert_size = math.ceil(expert_size)
+   print(n_nodes, ' X ', expert_size)
+   for node_idx = 1,n_nodes do
+      local experts = {}
+      for expert_idx = 1,opt.nBranch do
+         local expert = dp.Neural{
+            input_size=input_size, output_size=expert_size,
+            transfer=nn.Tanh()
+         }
+         if layer_idx == opt.nSwitchLayer then
+            -- last layer of experts is 2-layer MLP
+            expert = dp.Sequential{
+               models = {
+                  expert,
+                  dp.Neural{
+                     input_size=expert_size, output_size=n_classes,
+                     transfer=nn.LogSoftMax()
+                  }
+               }
+            }
+         end
+         table.insert(experts, expert)
+      end
+      local gater = dp.Sequential{
          models = {
             dp.Neural{
-               input_size=input_size,
-               output_size=opt.nExpertHidden,
+               input_size=input_size, output_size=opt.nGaterHidden,
                transfer=nn.Tanh()
             },
-            dp.Neural{
-               input_size=opt.nExpertHidden,
-               output_size=n_classes,
-               transfer=nn.LogSoftMax()
+            dp.Equanimous{
+               input_size=opt.nGaterHidden, output_size=opt.nBranch,
+               transfer=nn.Sigmoid(), n_sample=opt.nSample,
+               n_reinforce=opt.nReinforce, n_eval=opt.nEval
             }
          }
       }
-   )
+      table.insert(nodes, dp.SwitchNode{gater=gater, experts=experts})
+   end
+   input_size = expert_size
+   ndt:add(dp.SwitchLayer{nodes=nodes})
 end
-local gater = dp.Sequential{
-   models = {
-      dp.Neural{
-         input_size=input_size,
-         output_size=opt.nGaterHidden,
-         transfer=nn.Tanh()
-      },
-      dp.Equanimous{
-         input_size=opt.nGaterHidden,
-         output_size=opt.nExpert,
-         transfer=nn.Sigmoid(),
-         n_sample=opt.nSample,
-         n_reinforce=opt.nReinforce,
-         n_eval=opt.nEval
-      }
-   }
-}
-ndt:add(dp.SwitchNode{gater=gater, experts=experts})
+print(n_nodes, ' X ', n_classes)
 
 --[[GPU or CPU]]--
 if opt.type == 'cuda' then
@@ -98,10 +116,10 @@ if opt.type == 'cuda' then
 end
 
 --[[Propagators]]--
+local n_output_sample = opt.nSample^opt.nSwitchLayer
 train = dp.Conditioner{
    criterion = nn.ESSRLCriterion{
-      n_reinforce=opt.nReinforce, 
-      n_sample=opt.nSample,
+      n_reinforce=opt.nReinforce, n_sample=n_output_sample,
       n_classes=n_classes
    },
    visitor = { -- the ordering here is important:
@@ -118,13 +136,19 @@ train = dp.Conditioner{
    sampler = dp.ShuffleSampler{batch_size=opt.batchSize, sample_type=opt.type},
    progress = true
 }
-valid = dp.Evaluator{
-   criterion = nn.ClassNLLCriterion(),
+valid = dp.Shampoo{
+   criterion = nn.ESSRLCriterion{
+      n_reinforce=opt.nReinforce, n_sample=n_output_sample,
+      n_classes=n_classes
+   },
    feedback = dp.Confusion(),  
    sampler = dp.Sampler{sample_type=opt.type}
 }
-test = dp.Evaluator{
-   criterion = nn.ClassNLLCriterion(),
+test = dp.Shampoo{
+   criterion = nn.ESSRLCriterion{
+      n_reinforce=opt.nReinforce, n_sample=n_output_sample,
+      n_classes=n_classes
+   },
    feedback = dp.Confusion(),
    sampler = dp.Sampler{sample_type=opt.type}
 }

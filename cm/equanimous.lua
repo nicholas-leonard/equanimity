@@ -49,19 +49,26 @@ function Equanimous:_forward(cstate)
    parent._forward(self, cstate)
    -- sample n_sampe samples from a multinomial without replacement
    local n_sample = self._n_sample
-   self.ostate.routes = dp.multinomial(self.ostate.act, n_sample, true)
+   self.ostate.act_double = self.ostate.act:double()
+   self.ostate.routes = dp.multinomial(
+      self.ostate.act_double, n_sample, true
+   )
    -- alphas will eventually be used to weigh a weighted mean of outputs
-   self.ostate.alphas = torch.add(self.ostate.act, -self._targets[1])
+   self.ostate.alphas = torch.add(
+      self.ostate.act_double, -self._targets[1]
+   )
 end
 
 function Equanimous:_backward(cstate, scale)
-   local targets = self.ostate.act:clone():fill(self._targets[1])
+   local targets = self.ostate.act_double:clone():fill(self._targets[1])
    -- TODO :
    -- compare to alternative iteration over examples (batch_idx)
    for expert_idx, reinforce in pairs(self.ostate.reinforce_indices) do
       targets[{{},expert_idx}]:indexFill(1, reinforce, self._targets[2])
    end
-   self.ostate.grad = self._criterion:backward(self.ostate.act, targets)
+   self.ostate.grad = self._criterion:backward(
+      self.ostate.act_double, targets
+   ):type(self.ostate.act:type())
    parent._backward(self, cstate)
 end
 

@@ -2,7 +2,7 @@
 --[[ Equanimous ]]--
 -- samples routes from multinomial
 -- reinforces winning routes using MSE with 0/1 targets
--- epsilon-greedy exploration
+-- epsilon-greedy exploration (TODO, moving distribution)
 -- affine transform followed by non-linearity (transfer function)
 -- uses sigmoid transfer function by default for inputs to multinomial
 ------------------------------------------------------------------------
@@ -27,7 +27,7 @@ function Equanimous:__init(config)
       {arg='transfer', type='nn.Module', default=nn.Sigmoid(),
        help='a transfer function like nn.Tanh, nn.Sigmoid, nn.ReLU'},
       {arg='epsilon', type='number', default=0.1,
-       help='probability of sampling from uniform instead of multinomial'}
+       help='probability of sampling from inverse distribution'}
    )
    config.typename = config.typename or 'equanimous'
    config.transfer = transfer
@@ -56,23 +56,36 @@ function Equanimous:_forward(cstate)
    -- affine transform + transfer function
    parent._forward(self, cstate)
    self.ostate.act_double = self.ostate.act:double()
-   -- alphas will eventually be used to weigh a mean of outputs
-   local alphas = torch.add(
-      self.ostate.act_double, -self._targets[1]
-   )
-   alphas:cdiv(alphas:sum(2):expandAs(alphas))
+   -- e-greedy on entire batch
+   local p = math.random()
+   -- alphas are used to weigh a mean of leaf outputs
+   local alphas
+   local e_greedy = false
+   if p > self._epsilon then
+      alphas = torch.add(self.ostate.act_double, -self._targets[1])
+      alphas:cdiv(alphas:sum(2):expandAs(alphas))
+   else
+      e_greedy = true
+      alphas = self._alpha_dist:clone()
+      -- reverse distribution and make unlikely alphas more likely
+      alphas = alphas:add(-alphas:max()):mul(-1):div(alphas:sum())
+      alphas = alphas:reshape(1,alphas:size(1)):expandAs(self.ostate.act_double)
+   end
    self.ostate.alphas = alphas
    -- sample from a multinomial without replacement
    self.ostate.routes = dp.multinomial(
       self.ostate.alphas, self._n_sample, true
    )
    -- gather stats
-   local previous = 0
-   for i,upper in ipairs(self._alpha_bins) do
-      local current = torch.le(alphas,upper):double():sum()
-      self._alpha_dist[i] = self._alpha_dist[i] + current - previous
-      previous = current
+   if not e_greedy then
+      local previous = 0
+      for i,upper in ipairs(self._alpha_bins) do
+         local current = torch.le(alphas,upper):double():sum()
+         self._alpha_dist[i] = self._alpha_dist[i] + current - previous
+         previous = current
+      end
    end
+   self._sample_count = self._sample_count + alphas:size(1)
 end
 
 function Equanimous:_backward(cstate, scale)
@@ -101,14 +114,16 @@ function Equanimous:report()
    dr.dist = table.tostring(dr.dist:storage():totable())
    dr.bins = table.tostring(dr.bins)
    dr.name = self:id():toString()
-   print(dr)
+   print(dr, self._sample_count)
    return {
-      alpha = dist_report
+      alpha = dist_report,
+      n_sample = self._sample_count
    }
 end
 
 function Equanimous:zeroStatistics()
    self._alpha_dist:zero()
+   self._sample_count = 0
 end
 
 function Equanimous:_evaluateMAP(gstate)

@@ -2,6 +2,10 @@ require 'cm'
 
 -- TODO :
 -- gater does more than one backward forward on reinforce targets
+-- e-greedy in equanimous
+-- phase 2
+-- table of values
+-- graph of values.
 
 --[[parse command line arguments]]--
 
@@ -135,7 +139,7 @@ train = dp.Conditioner{
       dp.Learn{
          learning_rate=opt.learningRate, 
          observer = dp.LearningRateSchedule{
-            schedule={[10]=0.01, [40]=0.001}
+            schedule={[200]=0.01, [400]=0.001}
          }
       },
       dp.MaxNorm{max_out_norm=opt.maxOutNorm}
@@ -172,8 +176,7 @@ xp = dp.Experiment{
       --dp.FileLogger(),
       dp.EarlyStopper{
          error_report = {'validator','feedback','confusion','accuracy'},
-         maximize = true,
-         max_epochs = opt.maxTries
+         maximize = true, max_epochs = opt.maxTries
       }
    },
    random_seed = os.time(),

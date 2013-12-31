@@ -12,31 +12,32 @@ Equanimous.isEquanimous = true
 --E-greedy : http://junedmunshi.wordpress.com/tag/e-greedy-policy/
 function Equanimous:__init(config)
    config = config or {}
-   local args, n_sample, n_reinforce, n_eval, targets, transfer, epsilon 
+   local args, n_sample, n_reinforce, targets, transfer, 
+         epsilon, eval_proto
       = xlua.unpack(
       {config},
       'Equanimous', nil,
       {arg='n_sample', type='number', 
-       help='number of experts sampled per example during training.'},
+       help='number of experts sampled per example'},
       {arg='n_reinforce', type='number', 
        help='number of experts reinforced per example during training.'},
-      {arg='n_eval', type='number', 
-       help='number of experts chosen per example during evaluation.'},
       {arg='targets', type='table', default={0.1,0.9},
        help='targets used to diminish (first) and reinforce (last)'},
       {arg='transfer', type='nn.Module', default=nn.Sigmoid(),
        help='a transfer function like nn.Tanh, nn.Sigmoid, nn.ReLU'},
       {arg='epsilon', type='number', default=0.1,
-       help='probability of sampling from inverse distribution'}
+       help='probability of sampling from inverse distribution'},
+      {arg='eval_proto', type='string', default='MAP',
+       help='evaluation protocol : MAP, Stochastic Sampling, etc'}
    )
    config.typename = config.typename or 'equanimous'
    config.transfer = transfer
    parent.__init(self, config)   
    self._n_sample = n_sample
    self._n_reinforce = n_reinforce
-   self._n_eval = n_eval
    self._targets = targets
    self._epsilon = epsilon
+   self._eval_proto = eval_proto
    self._criterion = nn.MSECriterion()
    -- statistics :
    --- sparsity : 
@@ -68,7 +69,7 @@ function Equanimous:_forward(cstate)
       e_greedy = true
       alphas = self._alpha_dist:clone()
       -- reverse distribution and make unlikely alphas more likely
-      alphas = alphas:add(-alphas:max()):mul(-1):div(alphas:sum())
+      alphas:add(-alphas:max()):mul(-1):div(alphas:sum())
       alphas = alphas:reshape(1,alphas:size(1)):expandAs(self.ostate.act_double)
    end
    self.ostate.alphas = alphas
@@ -90,8 +91,7 @@ end
 
 function Equanimous:_backward(cstate, scale)
    local targets = self.ostate.act_double:clone():fill(self._targets[1])
-   -- TODO :
-   -- compare to alternative iteration over examples (batch_idx)
+   -- TODO : compare to alternative iteration over examples (batch_idx)
    for expert_idx, reinforce in pairs(self.ostate.reinforce_indices) do
       targets[{{},expert_idx}]:indexFill(1, reinforce, self._targets[2])
    end
@@ -102,9 +102,20 @@ function Equanimous:_backward(cstate, scale)
 end
 
 function Equanimous:_evaluate(cstate)
-   if self._evaluate_protocol == 'MAP' then
-      self._evaluateMap(gstate)
+   parent._forward(self, cstate)
+   self.ostate.act_double = self.ostate.act:double()
+   if self._eval_proto == 'MAP' then
+      return self._evaluateMAP(self, cstate)
    end
+   error"NotImplemented"
+end
+
+function Equanimous:_evaluateMAP(cstate)
+   local alphas = torch.add(self.ostate.act_double, -self._targets[1])
+   alphas:cdiv(alphas:sum(2):expandAs(alphas))
+   self.ostate.alphas = alphas
+   local __, routes = torch.sort(alphas, 2, true)
+   self.ostate.routes = routes[{{},{1,self._n_sample}}]
 end
 
 function Equanimous:report()
@@ -126,6 +137,3 @@ function Equanimous:zeroStatistics()
    self._sample_count = 0
 end
 
-function Equanimous:_evaluateMAP(gstate)
-   
-end

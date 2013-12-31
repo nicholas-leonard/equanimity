@@ -4,6 +4,7 @@
 local Conditioner, parent = torch.class("dp.Conditioner", "dp.Optimizer")
 
 function Conditioner:propagateBatch(batch, report)   
+   --if true then return end
    local model = self._model
    --[[ Phase 1 : Focus on examples ]]--
    --[[ feedforward ]]--
@@ -57,7 +58,6 @@ end
 function Conditioner:report()
    local report = parent.report(self)
    report.essrl = self._criterion:report()
-   print(report.essrl)
    return report
 end
 
@@ -77,12 +77,11 @@ function Shampoo:propagateBatch(batch, report)
    -- evaluate function for complete mini batch
    local batch_indices = torch.range(1,batch:nSample())
    
-   local ostates = model:forward{
-      input=batch:inputs(), carry={batch_indices=batch_indices},
-      global={focus='examples'}
+   local ostates = model:evaluate{
+      input=batch:inputs(), carry={batch_indices=batch_indices}
    }
    
-   local loss, outputs = self._criterion:forward(
+   local loss, outputs = self._criterion:evaluate(
       ostates, batch:targets(), batch_indices
    )
    
@@ -96,6 +95,8 @@ function Shampoo:propagateBatch(batch, report)
       self._feedback:add(batch)
    end
    --publish report for this optimizer
-   self._mediator:publish(self:id():name() .. ':' .. "doneFeedback", 
-                          report, batch)
+   self._mediator:publish(
+      self:id():name() .. ':' .. "doneFeedback", report, batch
+   )
+   model:doneBatch()
 end

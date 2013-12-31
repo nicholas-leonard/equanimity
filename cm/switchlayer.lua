@@ -32,7 +32,7 @@ function SwitchLayer:setup(config)
    self._data_view = self._models[1]:dataView()
 end
 
-function SwitchLayer:forward(state)
+function SwitchLayer:_preforward(state)
    -- if tensor, then makes table with tensor as member 'act'
    self:setInputState(state.input)
    -- if an istate from a non-switch models, then listify
@@ -47,7 +47,15 @@ function SwitchLayer:forward(state)
    if carry.batch_indices then
       state.carry = {carry}
    end
-   return parent.forward(self, state)
+   return state
+end
+
+function SwitchLayer:evaluate(state)
+   return parent.evaluate(self, self:_preforward(state))
+end
+
+function SwitchLayer:forward(state)
+   return parent.forward(self, self:_preforward(state))
 end
 
 function SwitchLayer:_forward(input_cstates)
@@ -63,7 +71,12 @@ function SwitchLayer:_forward(input_cstates)
          input=istate, global=self.global,
          carry=input_cstates[input_idx]
       }
-      local ostates, cstates = node:forward(state)
+      local ostates, cstates 
+      if self.gstate.evaluate then
+         ostates, cstates = node:evaluate(state)
+      else
+         ostates, cstates = node:forward(state)
+      end
       for output_idx, ostate in pairs(ostates) do
          local layer_idx = (input_idx-1) * nExperts + output_idx
          self.ostate[layer_idx] = ostate
@@ -108,3 +121,4 @@ function SwitchLayer:_backward(output_cstates)
    end
    return cstates
 end
+

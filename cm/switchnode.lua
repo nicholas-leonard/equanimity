@@ -19,7 +19,7 @@ function SwitchNode:__init(config)
    parent.__init(self, config)
    self._gater = gater
    self._experts = experts
-   self._models = _.concat(self._gater, self._experts)
+   self._models = _.concat({self._gater}, self._experts)
 end
 
 function SwitchNode:setup(config)
@@ -60,10 +60,16 @@ function SwitchNode:_forward(cstate)
    --print(self:id():toString(), cstate)
    self.istate.act_double = self.istate.act:double()
    -- forward gater to get routes
-   local gater_ostate = self._gater:forward{
+   local gater_istate = {
       -- shallow copy to allow gater to compute its own grads
       input=table.copy(self.istate), global=self.gstate, carry=cstate
    }
+   local gater_ostate 
+   if self.gstate.evaluate then 
+      gater_ostate = self._gater:evaluate(gater_istate)
+   else 
+      gater_ostate = self._gater:forward(gater_istate)
+   end
    -- routes is a matrix of indices
    local routes = gater_ostate.routes
    -- alphas is a matrix of rows that some to one and weight
@@ -98,12 +104,22 @@ function SwitchNode:_forward(cstate)
             batch_indices=cstate.batch_indices:index(1, expert_indices)
          }
          -- forward batch and update i/o states
-         local expert_ostate, expert_cstate = expert_branch:forward{
+         local expert_istate = {
             input=input_act:index(1, expert_indices):type(
                self.istate.act:type()
             ), 
             global=self.gstate, carry=expert_cstate
          }
+         local expert_ostate, expert_cstate
+         if self.gstate.evaluate then 
+            expert_ostate, expert_cstate = expert_branch:evaluate(
+               expert_istate
+            )
+         else
+            expert_ostate, expert_cstate = expert_branch:forward(
+               expert_istate
+            )
+         end
          -- save the alphas
          expert_ostate.alphas = torch.DoubleTensor(expert.alphas)
          table.merge(expert_ostate, expert_cstate)
@@ -155,16 +171,17 @@ function SwitchNode:_backward(cstates)
    input_grad:add(gater_istate.grad)
    self.istate.grad = input_grad
    -- prepare reinforce indices for the next layer
+   local concat_reinforce = {}
+   for expert_idx, expert_reinforce in pairs(i_reinforce) do
+      for __, batch_idx in ipairs(expert_reinforce) do
+         table.insert(concat_reinforce, batch_idx)
+      end
+   end
    local cstate = {
       batch_indices = self.istate.batch_indices,
-      reinforce_indices = _.uniq(_.concat(unpack(i_reinforce)))
+      reinforce_indices = _.uniq(concat_reinforce)
    }
    return cstate
-end
-
-function SwitchNode:_evaluate(cstate)
-   local routes = self._gater:evaluate(cstate)
-   
 end
 
 function SwitchNode:zeroGradParameters()

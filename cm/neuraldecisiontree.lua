@@ -1,11 +1,12 @@
 require 'cm'
 
 -- TODO :
+-- hyperparam sampler
 -- gater does more than one backward forward on reinforce targets
--- e-greedy in equanimous
 -- phase 2
 -- table of values
 -- graph of values.
+-- conv class
 
 --[[parse command line arguments]]--
 
@@ -13,9 +14,9 @@ cmd = torch.CmdLine()
 cmd:text()
 cmd:text('MNIST Neural Decision Tree Training/Optimization')
 cmd:text('Example:')
-cmd:text('$> th neuraldecisiontree.lua --batchSize 128 --momentum 0.5')
+cmd:text('$> th neuraldecisiontree.lua --batchSize 128 --momentum 0.5 --nTrunkHidden 400 --nGaterHidden 200 --hiddenScale 2 --type cuda --maxEpoch 1000 --maxTries 100 --nReinforce 1 --nSample 2 --nEval 1')
 cmd:text('Options:')
-cmd:option('--nEval', 2, 'number of experts chosen during evaluation')
+cmd:option('--nEval', 3, 'number of experts chosen during evaluation')
 cmd:option('--nSample', 2, 'number of experts sampled during training')
 cmd:option('--nReinforce', 1, 'number of experts reinforced during training')
 cmd:option('--nBranch', 8, 'number of expert branches per node')
@@ -32,8 +33,10 @@ cmd:option('--maxEpoch', 100, 'maximum number of epochs to run')
 cmd:option('--maxTries', 30, 'maximum number of epochs to try to find a better local minima for early-stopping')
 cmd:option('--dropout', false, 'apply dropout on hidden neurons, requires "nnx" luarock')
 cmd:option('--nTrunkHidden', 0, 'if greater than zero, add a trunk dp.Neural layer before dp.SwitchLayer(s)')
+cmd:option('--useDevice', 1, 'sets the device (GPU) to use for this hyperoptimization')
 cmd:text()
 opt = cmd:parse(arg or {})
+
 
 local target_range = {0.1, 0.9}
 print(opt)
@@ -122,6 +125,7 @@ print(n_nodes*opt.nBranch..' leafs for '..n_classes..' classes')
 --[[GPU or CPU]]--
 if opt.type == 'cuda' then
    require 'cutorch'
+   cutorch.setDevice(opt.useDevice)
    require 'cunn'
    ndt:cuda()
 end
@@ -151,7 +155,7 @@ train = dp.Conditioner{
 valid = dp.Shampoo{
    criterion = nn.ESSRLCriterion{
       n_reinforce=opt.nReinforce, n_sample=n_output_sample,
-      n_classes=n_classes, n_leaf=n_leaf
+      n_classes=n_classes, n_leaf=n_leaf, n_eval=opt.nEval
    },
    feedback = dp.Confusion(),  
    sampler = dp.Sampler{sample_type=opt.type}
@@ -159,7 +163,7 @@ valid = dp.Shampoo{
 test = dp.Shampoo{
    criterion = nn.ESSRLCriterion{
       n_reinforce=opt.nReinforce, n_sample=n_output_sample,
-      n_classes=n_classes, n_leaf=n_leaf
+      n_classes=n_classes, n_leaf=n_leaf, n_eval=opt.nEval
    },
    feedback = dp.Confusion(),
    sampler = dp.Sampler{sample_type=opt.type}

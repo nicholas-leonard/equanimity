@@ -62,7 +62,7 @@ function Equanimous:_forward(cstate)
    -- alphas are used to weigh a mean of leaf outputs
    local alphas
    local e_greedy = false
-   if p > self._epsilon then
+   if p >= self._epsilon then
       alphas = torch.add(self.ostate.act_double, -self._targets[1])
       alphas:cdiv(alphas:sum(2):expandAs(alphas))
    else
@@ -125,7 +125,7 @@ function Equanimous:report()
    dr.dist = table.tostring(dr.dist:storage():totable())
    dr.bins = table.tostring(dr.bins)
    dr.name = self:id():toString()
-   print(dr, self._sample_count)
+   --print(dr, self._sample_count)
    return {
       alpha = dist_report,
       n_sample = self._sample_count

@@ -9,16 +9,20 @@ SwitchNode.isSwitchNode = true
 
 function SwitchNode:__init(config)
    config = config or {}
-   local args, gater, experts = xlua.unpack(
+   local args, gater, experts, block_gater = xlua.unpack(
       {config},
       'SwitchNode', nil,
       {arg='gater', type='dp.Model'},
-      {arg='experts', type='table'}
+      {arg='experts', type='table'},
+      {arg='block_gater', type='boolean', default=false,
+       help='when true, gater does not backpropagate '..
+       'into expert(s) feeding into the gater (from previous layers).'}
    )
    config.typename = 'switchnode'
    parent.__init(self, config)
    self._gater = gater
    self._experts = experts
+   self._block_gater = block_gater
    self._models = _.concat({self._gater}, self._experts)
 end
 
@@ -168,7 +172,9 @@ function SwitchNode:_backward(cstates)
    -- backward gater to get routes
    self._gater.ostate.reinforce_indices = g_reinforce
    local gater_istate = self._gater:backward{global=self.global}
-   input_grad:add(gater_istate.grad)
+   if not self._block_gater then
+      input_grad:add(gater_istate.grad)
+   end
    self.istate.grad = input_grad
    -- prepare reinforce indices for the next layer
    local concat_reinforce = {}

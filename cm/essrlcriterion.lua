@@ -41,19 +41,17 @@ function ESSRLCriterion:__init(config)
    ---- distribution of examples to experts
    self._reinforce_dist = torch.DoubleTensor(self._n_leaf)
    self._sample_dist = torch.DoubleTensor(self._n_leaf)
-   ---- exponential moving average
-   self._reinforce_ema = torch.DoubleTensor(self._n_leaf)
-   self._sample_ema = torch.DoubleTensor(self._n_leaf)
-   self._present_factor = 0.5 -- higher val discounts past vals faster
-   ---- mean, standard deviation, min, max
-   self._reinforce_stats = {}
-   self._sample_stats = {}
+   --- specialization :
+   self._spec_matrix = torch.DoubleTensor(self._n_leaf, self._n_classes) 
+   self._err_matrix = torch.DoubleTensor(self._n_leaf, self._n_classes) 
    self:resetStatistics()
 end
 
 function ESSRLCriterion:resetStatistics()
    self._reinforce_dist:zero()
    self._sample_dist:zero()
+   self._spec_matrix:zero()
+   self._err_matrix:zero()
 end
 
 function ESSRLCriterion:forward(expert_ostates, targets, indices)
@@ -73,20 +71,19 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
          -- gather statistics
          self._sample_dist[expert_idx] 
             = self._sample_dist[expert_idx] + expert_ostate.act:size(1)
-         self._sample_ema[expert_idx]
-            = ((1-self._present_factor) * self._sample_ema[expert_idx])
-            + (self._present_factor * expert_ostate.act:size(1))
          expert_ostate.act_double = expert_ostate.act:double()
          for i = 1, expert_ostate.batch_indices:size(1) do
             local batch_idx = expert_ostate.batch_indices[i]
             local example = batch[batch_idx] or {
-               experts={}, acts={}, errors={},
+               experts={}, acts={}, errors={}, targets={},
                criteria={}, alphas={}, origins={}
             }        
             local act = expert_ostate.act_double[{i,{}}]
             local criterion = self._criterion()
-            local err = criterion:forward(act, targets[batch_idx])
+            local target = targets[batch_idx] 
+            local err = criterion:forward(act, target)
             table.insert(example.experts, expert_idx)
+            table.insert(example.targets, target)
             table.insert(example.acts, act)
             table.insert(example.criteria, criterion)
             table.insert(example.errors, err)
@@ -108,11 +105,21 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       for sample_idx, sample_acts in pairs(example.acts) do
          example_acts[{sample_idx, {}}] = sample_acts
       end
-      local example_experts = torch.LongTensor(example.experts)
+      local example_targets 
+         = torch.LongTensor(example.targets):index(1, idxs)
+      local target = example_targets[1]
+      local example_experts 
+         = torch.LongTensor(example.experts):index(1, idxs)
+      local expert_idx = example_experts[1]
+      self._spec_matrix[{expert_idx, target}] 
+            = self._spec_matrix[{expert_idx, target}] + 1 
+      local err = example_errors[1]
+      self._err_matrix[{expert_idx, target}] 
+            = self._err_matrix[{expert_idx, target}] + err
       local example_alphas = torch.DoubleTensor(example.alphas)
       local example_origins = torch.LongTensor(example.origins)
       input_acts[{batch_idx, {}, {}}] = example_acts:index(1, idxs)
-      input_experts[{batch_idx,{}}] = example_experts:index(1, idxs)
+      input_experts[{batch_idx,{}}] = example_experts
       input_alphas[{batch_idx,{}}] = example_alphas:index(1, idxs)
       input_origins[{batch_idx,{}}] = example_origins:index(1, idxs)
       -- reorder criteria and keep only winning for backward pass
@@ -280,9 +287,6 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
       -- gather statistics
       self._reinforce_dist[expert_idx] 
          = self._reinforce_dist[expert_idx] + #expert.reinforce
-      self._reinforce_ema[expert_idx] 
-         = ((1-self._present_factor) * self._reinforce_ema[expert_idx])
-         + (self._present_factor * #expert.reinforce)
       cstates[expert_idx] = {
          batch_indices = expert_ostate.batch_indices,
          reinforce_indices = expert.reinforce
@@ -325,15 +329,18 @@ end
 function ESSRLCriterion:report()
    local report = {
       reinforce = dp.distReport(self._reinforce_dist),
-      sample = dp.distReport(self._sample_dist),
-      reinforce_ema = dp.distReport(self._reinforce_ema),
-      sample_ema = dp.distReport(self._sample_ema)
+      sample = dp.distReport(self._sample_dist)
    }
    local r = table.merge({}, report)
    r.reinforce.dist = table.tostring(r.reinforce.dist:storage():totable())
    r.sample.dist = table.tostring(r.sample.dist:storage():totable())
-   r.reinforce_ema.dist = table.tostring(r.reinforce_ema.dist:storage():totable())
-   r.sample_ema.dist = table.tostring(r.sample_ema.dist:storage():totable())
    print(r)
+   print('specialization matrix')
+   print(self._spec_matrix)
+   print('error matrix')
+   self._spec_matrix:add(0.000001)
+   print(torch.cdiv(self._err_matrix, self._spec_matrix))
+   print(self._err_matrix:sum(2):cdiv(self._spec_matrix:sum(2)))
+   print(self._err_matrix:sum(1):cdiv(self._spec_matrix:sum(1)))
    return report
 end

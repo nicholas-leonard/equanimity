@@ -14,7 +14,7 @@ cmd = torch.CmdLine()
 cmd:text()
 cmd:text('MNIST Neural Decision Tree Training/Optimization')
 cmd:text('Example:')
-cmd:text('$> th neuraldecisiontree.lua --batchSize 128 --momentum 0.5 --nTrunkHidden 400 --nGaterHidden 200 --hiddenScale 2 --type cuda --maxEpoch 1000 --maxTries 100 --nReinforce 1 --nSample 2 --nEval 1')
+cmd:text('$> th neuraldecisiontree.lua --batchSize 128 --momentum 0.5 --learningRate 0.01 --nTrunkHidden 400 --nGaterHidden 200 --hiddenScale 2 --type cuda --maxEpoch 1000 --maxTries 100 --nReinforce 1 --nSample 2 --nEval 1')
 cmd:text('Options:')
 cmd:option('--nEval', 3, 'number of experts chosen during evaluation')
 cmd:option('--nSample', 2, 'number of experts sampled during training')
@@ -34,6 +34,8 @@ cmd:option('--maxTries', 30, 'maximum number of epochs to try to find a better l
 cmd:option('--dropout', false, 'apply dropout on hidden neurons, requires "nnx" luarock')
 cmd:option('--nTrunkHidden', 0, 'if greater than zero, add a trunk dp.Neural layer before dp.SwitchLayer(s)')
 cmd:option('--useDevice', 1, 'sets the device (GPU) to use for this hyperoptimization')
+cmd:option('--blockGater', false, 'when true, gater does not backpropagate into previous expert(s)')
+cmd:option('--epsilon', 0.1, 'probability of sampling from inverse distribution') 
 cmd:text()
 opt = cmd:parse(arg or {})
 
@@ -111,11 +113,16 @@ for layer_idx = 1,opt.nSwitchLayer do
             dp.Equanimous{
                input_size=gater_size, output_size=opt.nBranch,
                transfer=nn.Sigmoid(), n_sample=opt.nSample,
-               n_reinforce=opt.nReinforce, n_eval=opt.nEval
+               n_reinforce=opt.nReinforce, n_eval=opt.nEval,
+               epsilon=opt.epsilon
             }
          }
       }
-      table.insert(nodes, dp.SwitchNode{gater=gater, experts=experts})
+      table.insert(nodes, 
+         dp.SwitchNode{
+            gater=gater, experts=experts, block_gater=opt.blockGater
+         }
+      )
    end
    input_size = expert_size
    ndt:add(dp.SwitchLayer{nodes=nodes})

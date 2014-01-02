@@ -37,9 +37,11 @@ dist = {
    learning_rate = dp.WeightedChoose{
       [0.5]=0.1, [0.1]=0.8, [0.05]=0.1, [0.01]=0.3, [0.001]=0.1
    },
-   learning_schedule = dp.WeightedChoose{
-      ['100=/10,200=/10']=0.1, ['100=/10,150=/10']=0.1,
-      ['200=/10,250=/10']=0.1, ['none']=0.3
+   learning_decay1 = dp.WeightedChoose{
+      [50]=5, [100]=4, [200]=3, ['none']=2
+   },
+   learning_decay2 = dp.WeightedChoose{
+      [50]=5, [100]=4, [200]=3, ['none']=2
    },
    weight_constraint = dp.WeightedChoose{
       ['weightdecay']=0.2, ['maxnorm']=0.7, ['both']=0.1

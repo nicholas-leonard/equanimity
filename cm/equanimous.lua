@@ -125,7 +125,7 @@ function Equanimous:report()
    dr.dist = table.tostring(dr.dist:storage():totable())
    dr.bins = table.tostring(dr.bins)
    dr.name = self:id():toString()
-   --print(dr, self._sample_count)
+   print(dr.dist)
    return {
       alpha = dist_report,
       n_sample = self._sample_count

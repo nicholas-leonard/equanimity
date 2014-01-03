@@ -2,7 +2,6 @@ require 'cm'
 
 -- TODO :
 -- hyperparam sampler
--- gater does more than one backward forward on reinforce targets
 -- phase 2
 -- table of values
 -- graph of values.
@@ -16,12 +15,12 @@ cmd:text('MNIST Neural Decision Tree Training/Optimization')
 cmd:text('Example:')
 cmd:text('$> th neuraldecisiontree.lua --batchSize 128 --momentum 0.5 --learningRate 0.01 --nTrunkHidden 400 --nGaterHidden 200 --hiddenScale 2 --type cuda --maxEpoch 1000 --maxTries 100 --nReinforce 1 --nSample 2 --nEval 1')
 cmd:text('Options:')
-cmd:option('--nEval', 3, 'number of experts chosen during evaluation')
+cmd:option('--nEval', 1, 'number of experts chosen during evaluation')
 cmd:option('--nSample', 2, 'number of experts sampled during training')
 cmd:option('--nReinforce', 1, 'number of experts reinforced during training')
 cmd:option('--nBranch', 8, 'number of expert branches per node')
 cmd:option('--nSwitchLayer', 1, 'number of switchlayers in the tree')
-cmd:option('--hiddenScale', 1.1, '')
+cmd:option('--hiddenScale', 2, '')
 cmd:option('--learningRate', 0.1, 'learning rate at t=0')
 cmd:option('--maxOutNorm', 1, 'max norm each layers output neuron weights')
 cmd:option('--momentum', 0, 'momentum')
@@ -36,9 +35,10 @@ cmd:option('--nTrunkHidden', 0, 'if greater than zero, add a trunk dp.Neural lay
 cmd:option('--useDevice', 1, 'sets the device (GPU) to use for this hyperoptimization')
 cmd:option('--blockGater', false, 'when true, gater does not backpropagate into previous expert(s)')
 cmd:option('--epsilon', 0.1, 'probability of sampling from inverse distribution') 
+cmd:option('--firstDecay', 200, 'epoch at which learning rate is first decayed by a factor of 0.1')
+cmd:option('--secondDecay', 400, 'epoch at which learning rate is then decayed by another factor of 0.1')
 cmd:text()
 opt = cmd:parse(arg or {})
-
 
 local target_range = {0.1, 0.9}
 print(opt)
@@ -132,8 +132,8 @@ print(n_nodes*opt.nBranch..' leafs for '..n_classes..' classes')
 --[[GPU or CPU]]--
 if opt.type == 'cuda' then
    require 'cutorch'
-   cutorch.setDevice(opt.useDevice)
    require 'cunn'
+   cutorch.setDevice(opt.useDevice)
    ndt:cuda()
 end
 
@@ -150,7 +150,10 @@ train = dp.Conditioner{
       dp.Learn{
          learning_rate=opt.learningRate, 
          observer = dp.LearningRateSchedule{
-            schedule={[200]=0.01, [400]=0.001}
+            schedule={
+               [opt.firstDecay]=opt.learningRate*0.1, 
+               [opt.secondDecay]=opt.learningRate*0.01
+            }
          }
       },
       dp.MaxNorm{max_out_norm=opt.maxOutNorm}
@@ -195,4 +198,3 @@ xp = dp.Experiment{
 }
 
 xp:run(datasource)
-

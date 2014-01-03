@@ -97,7 +97,7 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       -- sort each example's experts by ascending error
       local example_errors, idxs = torch.DoubleTensor(
          example.errors
-      ):sort()
+      ):sort(1, true)
       assert(example_errors:size(1) == self._n_sample)
       local example_acts = torch.DoubleTensor(
          #example.acts, self._n_classes
@@ -244,8 +244,6 @@ function ESSRLCriterion:evaluate(expert_ostates, targets, indices)
       torch.reshape(alphas, unpack(size)):expandAs(win_input_acts), 
       win_input_acts
    ):sum(2)[{{},1,{}}]
-   --print('alphas', alphas)
-   --print('outputs', outputs)
    -- measure error
    local criterion = self._criterion()
    local output_error = criterion:forward(outputs, targets)
@@ -257,7 +255,8 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
    local experts = {}
    for batch_idx = 1,self._input_experts:size(1) do
       local example = self._batch[batch_idx]
-      for sample_idx = 1,self._input_experts:size(2) do
+      local n_sample = self._input_experts:size(2)
+      for sample_idx = 1,n_sample do
          local expert_idx = self._input_experts[{batch_idx,sample_idx}]
          local origin_idx = self._input_origins[{batch_idx,sample_idx}]
          local expert = experts[expert_idx] or {
@@ -273,6 +272,9 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
             )
             -- backprop through criterion
             grad = criterion:backward(act, targets[batch_idx])
+            --table.insert(expert.reinforce, origin_idx)
+         end
+         if sample_idx > n_sample - self._n_reinforce then
             table.insert(expert.reinforce, origin_idx)
          end
          table.insert(expert.grads, grad)
@@ -329,7 +331,9 @@ end
 function ESSRLCriterion:report()
    local report = {
       reinforce = dp.distReport(self._reinforce_dist),
-      sample = dp.distReport(self._sample_dist)
+      sample = dp.distReport(self._sample_dist),
+      spec = self._spec_matrix,
+      expert_error = self._err_matrix:sum(2):cdiv(self._spec_matrix:sum(2))
    }
    local r = table.merge({}, report)
    r.reinforce.dist = table.tostring(r.reinforce.dist:storage():totable())
@@ -339,7 +343,6 @@ function ESSRLCriterion:report()
    print(self._spec_matrix)
    print('error matrix')
    self._spec_matrix:add(0.000001)
-   print(torch.cdiv(self._err_matrix, self._spec_matrix))
    print(self._err_matrix:sum(2):cdiv(self._spec_matrix:sum(2)))
    print(self._err_matrix:sum(1):cdiv(self._spec_matrix:sum(1)))
    return report

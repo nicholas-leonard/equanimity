@@ -40,7 +40,6 @@ cmd:option('--secondDecay', 400, 'epoch at which learning rate is then decayed b
 cmd:text()
 opt = cmd:parse(arg or {})
 
-local target_range = {0.1, 0.9}
 print(opt)
 
 --[[Experiment ID generator]]--
@@ -190,7 +189,8 @@ xp = dp.Experiment{
       --dp.FileLogger(),
       dp.EarlyStopper{
          error_report = {'validator','feedback','confusion','accuracy'},
-         maximize = true, max_epochs = opt.maxTries
+         maximize = true, max_epochs = opt.maxTries,
+         max_error = 0.75, min_epoch = 10, start_epoch = 11
       }
    },
    random_seed = os.time(),

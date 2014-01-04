@@ -89,7 +89,8 @@ function NDTFactory:buildModel(opt)
                input_size=g_input_size, output_size=opt.n_branch,
                dropout=self:buildDropout(opt.gater_dropout and 0.5),
                transfer=nn.Sigmoid(), n_sample=opt.n_sample,
-               n_reinforce=opt.n_reinforce, n_eval=opt.n_eval
+               n_reinforce=opt.n_reinforce, n_eval=opt.n_eval,
+               epsilon=opt.epsilon
             }
          )
          table.insert(nodes, dp.SwitchNode{gater=gater, experts=experts})
@@ -180,13 +181,13 @@ function PGNDTFactory:buildObserver(opt)
    return {
       self._logger,
       dp.PGEarlyStopper{
-         start_epoch = 1,
+         start_epoch = 11,
          pg = self._pg,
          error_report = {'validator','feedback','confusion','accuracy'},
          maximize = true,
          max_epochs = opt.max_tries,
          save_strategy = self._save_strategy,
-         min_epoch = 10, max_error = 70
+         min_epoch = 10, max_error = 0.7
       },
       dp.PGDone{pg=self._pg}
    }

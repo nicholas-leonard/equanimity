@@ -19,7 +19,7 @@ cmd:option('--weightDecay', 0, 'weight decay factor')
 cmd:option('--momentum', 0, 'momentum factor')
 cmd:option('--nesterov', false, 'use nesterov momentum')
 cmd:option('--expertWidth', 1024, 'width of trunk and combined width of experts times expert width scale')
-cmd:option('--expertWidthScales', '{2,2,2}', 'see expertWidth')
+cmd:option('--expertWidthScales', '{1,1,1}', 'see expertWidth')
 cmd:option('--gaterWidth', 256, 'width of gater and combinded width of gaters times gater scale factor')
 cmd:option('--gaterWidthScales', '{1,2,2}', 'see gaterWidth')
 cmd:option('--gaterDept', '{2,2,2}', 'dept of gaters in different layers')
@@ -32,6 +32,7 @@ cmd:option('--inputDropout', false, 'apply dropout on inputs, requires "nnx" lua
 cmd:option('--expertDropout', false, 'apply dropout on experts, requires "nnx" luarock')
 cmd:option('--gaterDropout', false, 'apply dropout on gaters, requires "nnx" luarock')
 cmd:option('--outputDropout', false, 'apply dropout on outputs, requires "nnx" luarock')
+cmd:option('--shareOutput', false, 'share parameters of output layer')
 cmd:option('--useDevice', 1, 'sets the device (GPU) to use for this hyperoptimization')
 cmd:option('--blockGater', false, 'when true, gater does not backpropagate into previous expert(s)')
 cmd:option('--epsilon', 0.1, 'probability of sampling from inverse distribution') 
@@ -83,7 +84,8 @@ local hp = {
    n_sample = opt.nSample,
    n_eval = opt.nEval,
    n_reinforce = opt.nReinforce,
-   epsilon = opt.epsilon
+   epsilon = opt.epsilon,
+   share_output = opt.shareOutput,
 }
 
 local pg = dp.Postgres()

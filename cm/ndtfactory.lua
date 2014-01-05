@@ -43,6 +43,7 @@ function NDTFactory:buildModel(opt)
       print(n_nodes*opt.n_branch..' experts with '
             ..expert_size..' hidden neurons')
       print(n_nodes..' gaters with '..gater_size..' hidden neurons')
+      local shared_output
       for node_idx = 1,n_nodes do
          local experts = {}
          for expert_idx = 1,opt.n_branch do
@@ -53,19 +54,20 @@ function NDTFactory:buildModel(opt)
             }
             if layer_idx == opt.n_switch_layer then
                -- last layer of experts is 2-layer MLP
-               expert = dp.Sequential{
-                  models = {
-                     expert,
-                     dp.Neural{
-                        input_size=expert_size,
-                        output_size=#opt.classes,
-                        transfer=nn.LogSoftMax(),
-                        dropout=self:buildDropout(
-                           opt.output_dropout and 0.5
-                        )
-                     }
-                  }
+               local output = dp.Neural{
+                  input_size=expert_size, output_size=#opt.classes,
+                  transfer=nn.LogSoftMax(),
+                  dropout=self:buildDropout(opt.output_dropout and 0.5)
                }
+               -- share output params (convolve output layer on experts)
+               if opt.share_output then
+                  if shared_output then
+                     output:share(shared_output)
+                  else
+                     shared_output = output
+                  end
+               end
+               expert = dp.Sequential{ models = {expert, output} }
             end
             table.insert(experts, expert)
          end

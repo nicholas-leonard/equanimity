@@ -43,14 +43,11 @@ dist = {
    learning_decay2 = dp.WeightedChoose{
       [50]=5, [100]=4, [200]=3, ['none']=2
    },
-   weight_constraint = dp.WeightedChoose{
-      ['weightdecay']=0.2, ['maxnorm']=0.7, ['both']=0.1
-   },
    max_out_norm = dp.WeightedChoose{
-      [0.5] = 0.1, [1] = 0.7, [2] = 0.2
+      [0]=1, [0.5]=1, [1]=10, [2]=2 , [4]=1
    },
    weight_decay = dp.WeightedChoose{
-      [0.0005] = 0.1, [0.00005] = 0.7, [0.000005] = 0.2
+      [0.0005] = 0.1, [0.00005] = 0.7, [0.000005] = 0.2, [0]=10
    },
    momentum = dp.WeightedChoose{
       [0] = 1, [0.5] = 0.1, [0.7] = 0.1, [0.9] = 0.3, [0.99] = 0.5

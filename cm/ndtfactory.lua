@@ -43,6 +43,7 @@ function NDTFactory:buildModel(opt)
       print(n_nodes*opt.n_branch..' experts with '
             ..expert_size..' hidden neurons')
       print(n_nodes..' gaters with '..gater_size..' hidden neurons')
+      local shared_output
       for node_idx = 1,n_nodes do
          local experts = {}
          for expert_idx = 1,opt.n_branch do
@@ -53,19 +54,20 @@ function NDTFactory:buildModel(opt)
             }
             if layer_idx == opt.n_switch_layer then
                -- last layer of experts is 2-layer MLP
-               expert = dp.Sequential{
-                  models = {
-                     expert,
-                     dp.Neural{
-                        input_size=expert_size,
-                        output_size=#opt.classes,
-                        transfer=nn.LogSoftMax(),
-                        dropout=self:buildDropout(
-                           opt.output_dropout and 0.5
-                        )
-                     }
-                  }
+               local output = dp.Neural{
+                  input_size=expert_size, output_size=#opt.classes,
+                  transfer=nn.LogSoftMax(),
+                  dropout=self:buildDropout(opt.output_dropout and 0.5)
                }
+               -- share output params (convolve output layer on experts)
+               if opt.share_output then
+                  if shared_output then
+                     output:share(shared_output)
+                  else
+                     shared_output = output
+                  end
+               end
+               expert = dp.Sequential{ models = {expert, output} }
             end
             table.insert(experts, expert)
          end
@@ -89,7 +91,8 @@ function NDTFactory:buildModel(opt)
                input_size=g_input_size, output_size=opt.n_branch,
                dropout=self:buildDropout(opt.gater_dropout and 0.5),
                transfer=nn.Sigmoid(), n_sample=opt.n_sample,
-               n_reinforce=opt.n_reinforce, n_eval=opt.n_eval
+               n_reinforce=opt.n_reinforce, n_eval=opt.n_eval,
+               epsilon=opt.epsilon
             }
          )
          table.insert(nodes, dp.SwitchNode{gater=gater, experts=experts})
@@ -180,13 +183,13 @@ function PGNDTFactory:buildObserver(opt)
    return {
       self._logger,
       dp.PGEarlyStopper{
-         start_epoch = 1,
+         start_epoch = 11,
          pg = self._pg,
          error_report = {'validator','feedback','confusion','accuracy'},
          maximize = true,
          max_epochs = opt.max_tries,
          save_strategy = self._save_strategy,
-         min_epoch = 10, max_error = 70
+         min_epoch = 10, max_error = 0.7
       },
       dp.PGDone{pg=self._pg}
    }

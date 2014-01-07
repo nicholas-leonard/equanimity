@@ -94,7 +94,7 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       end
    end
    for batch_idx, example in pairs(batch) do
-      -- sort each example's experts by ascending error
+      -- sort each example's experts by descending error
       local example_errors, idxs = torch.DoubleTensor(
          example.errors
       ):sort(1, true)
@@ -130,6 +130,7 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
          end
          table.insert(criteria, example.criteria[idxs[sample_idx]])
       end
+      example.criteria = criteria
    end
    -- For each example, reinforce winning experts (those that have 
    -- least error) by allowing them to learn and backward-propagating
@@ -176,80 +177,6 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
    return output_error, outputs
 end
 
-function ESSRLCriterion:evaluate(expert_ostates, targets, indices)
-   assert(type(expert_ostates) == 'table')
-   assert(torch.isTensor(targets))
-   assert(torch.isTensor(indices))
-   local n_example = indices:size(1)
-   local act_size = {n_example, self._n_sample, self._n_classes}
-   local input_acts = torch.DoubleTensor(unpack(act_size))
-   local input_alphas = torch.DoubleTensor(n_example, self._n_sample)
-   local batch = {}
-   for expert_idx, expert_ostate in pairs(expert_ostates) do
-      if type(expert_idx) == 'number' then
-         -- gather statistics
-         self._sample_dist[expert_idx] 
-            = self._sample_dist[expert_idx] + expert_ostate.act:size(1)
-         expert_ostate.act_double = expert_ostate.act:double()
-         --print('act', expert_ostate.act_double)
-         --print('alphas', expert_ostate.alphas)
-         for i = 1, expert_ostate.batch_indices:size(1) do
-            local batch_idx = expert_ostate.batch_indices[i]
-            local example = batch[batch_idx] or {acts={}, alphas={}}  
-            table.insert(example.acts, expert_ostate.act_double[{i,{}}])
-            table.insert(example.alphas, expert_ostate.alphas[i])
-            batch[batch_idx] = example
-         end
-      end
-   end
-   for batch_idx, example in pairs(batch) do
-      -- sort each example's experts by descending alpha
-      local example_alphas, idxs = torch.DoubleTensor(
-         example.alphas
-      ):sort(1,true)
-      assert(example_alphas:size(1) == self._n_sample)
-      local example_acts = torch.DoubleTensor(
-         #example.acts, self._n_classes
-      )
-      for sample_idx, sample_acts in pairs(example.acts) do
-         example_acts[{sample_idx, {}}] = sample_acts
-      end
-      input_acts[{batch_idx, {}, {}}] = example_acts:index(1, idxs)
-      input_alphas[{batch_idx,{}}] = example_alphas
-   end
-   local win_input_acts = input_acts[{{},{1,self._n_eval},{}}]
-   local win_input_alphas = input_alphas[{{},{1,self._n_eval}}]
-   local alphas
-   if self._accumulator == 'softmax' then
-      -- normalize alphas using softmax
-      alphas = torch.exp(win_input_alphas)
-      alphas:cdiv(alphas:sum(2):expandAs(alphas))
-   elseif self._accumulator == 'normalize' then 
-      -- normalize alphas to sum to one
-      local sum = win_input_alphas:sum(2):expandAs(win_input_alphas)
-      alphas = torch.cdiv(win_input_alphas,sum)
-   elseif self._accumulator == 'truncate' then 
-      -- normalize alphas to sum to one but truncate min val
-      alphas = win_input_alphas:add(
-         -win_input_alphas:min(2):expandAs(win_input_alphas)
-      )
-      alphas:cdiv(alphas:sum(2):expandAs(alphas))
-   else
-      error"Unknown accumulator"
-   end
-   -- alpha-weighted mean of activations to get outputs
-   local size = alphas:size():totable()
-   size[3] = 1
-   local outputs = torch.cmul(
-      torch.reshape(alphas, unpack(size)):expandAs(win_input_acts), 
-      win_input_acts
-   ):sum(2)[{{},1,{}}]
-   -- measure error
-   local criterion = self._criterion()
-   local output_error = criterion:forward(outputs, targets)
-   return output_error, outputs
-end
-
 function ESSRLCriterion:backward(expert_ostates, targets, indices)
    --regroup by experts
    local experts = {}
@@ -265,6 +192,7 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
          table.insert(expert.origins, origin_idx)
          -- non-reinforce expert-example pairs have no grad (dont learn)
          local grad = false
+         -- focus backprop on poorer experts
          if sample_idx <= self._n_reinforce then
             local criterion = example.criteria[sample_idx]
             local act = self._input_acts:select(1,batch_idx):select(
@@ -274,7 +202,8 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
             grad = criterion:backward(act, targets[batch_idx])
             --table.insert(expert.reinforce, origin_idx)
          end
-         if sample_idx > n_sample - self._n_reinforce then
+         -- reinforce stronger experts in gater
+         if sample_idx >= n_sample - self._n_reinforce + 1 then
             table.insert(expert.reinforce, origin_idx)
          end
          table.insert(expert.grads, grad)
@@ -307,6 +236,97 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
       )
    end
    return expert_ostates, cstates
+end
+
+
+function ESSRLCriterion:evaluate(expert_ostates, targets, indices)
+   assert(type(expert_ostates) == 'table')
+   assert(torch.isTensor(targets))
+   assert(torch.isTensor(indices))
+   local n_example = indices:size(1)
+   local act_size = {n_example, self._n_sample, self._n_classes}
+   local input_acts = torch.DoubleTensor(unpack(act_size))
+   local input_alphas = torch.DoubleTensor(n_example, self._n_sample)
+   local batch = {}
+   for expert_idx, expert_ostate in pairs(expert_ostates) do
+      if type(expert_idx) == 'number' then
+         -- gather statistics
+         self._sample_dist[expert_idx] 
+            = self._sample_dist[expert_idx] + expert_ostate.act:size(1)
+         expert_ostate.act_double = expert_ostate.act:double()
+         --print('act', expert_ostate.act_double)
+         --print('alphas', expert_ostate.alphas)
+         for i = 1, expert_ostate.batch_indices:size(1) do
+            local batch_idx = expert_ostate.batch_indices[i]
+            local example = batch[batch_idx] 
+               or {acts={},alphas={},errors={},targets={},experts={}}  
+            local act = expert_ostate.act_double[{i,{}}]
+            table.insert(example.acts, act)
+            table.insert(example.alphas, expert_ostate.alphas[i])
+            -- for stats gathering
+            local criterion = self._criterion()
+            local target = targets[batch_idx]
+            table.insert(example.errors, criterion:forward(act, target))
+            table.insert(example.targets, target)
+            table.insert(example.experts, expert_idx)
+            batch[batch_idx] = example
+         end
+      end
+   end
+   for batch_idx, example in pairs(batch) do
+      -- sort each example's experts by descending alpha
+      local example_alphas, idxs = torch.DoubleTensor(
+         example.alphas
+      ):sort(1,true)
+      assert(example_alphas:size(1) == self._n_sample)
+      local example_acts = torch.DoubleTensor(
+         #example.acts, self._n_classes
+      )
+      for sample_idx, sample_acts in pairs(example.acts) do
+         example_acts[{sample_idx, {}}] = sample_acts
+      end
+      input_acts[{batch_idx, {}, {}}] = example_acts:index(1, idxs)
+      input_alphas[{batch_idx,{}}] = example_alphas
+      -- gather stats
+      local target = example.targets[idxs[1]]
+      local expert_idx = example.experts[idxs[1]]
+      self._spec_matrix[{expert_idx, target}] 
+            = self._spec_matrix[{expert_idx, target}] + 1 
+      local err = example.errors[idxs[1]]
+      self._err_matrix[{expert_idx, target}] 
+            = self._err_matrix[{expert_idx, target}] + err
+   end
+   local win_input_acts = input_acts[{{},{1,self._n_eval},{}}]
+   local win_input_alphas = input_alphas[{{},{1,self._n_eval}}]
+   local alphas
+   if self._accumulator == 'softmax' then
+      -- normalize alphas using softmax
+      alphas = torch.exp(win_input_alphas)
+      alphas:cdiv(alphas:sum(2):expandAs(alphas))
+   elseif self._accumulator == 'normalize' then 
+      -- normalize alphas to sum to one
+      local sum = win_input_alphas:sum(2):expandAs(win_input_alphas)
+      alphas = torch.cdiv(win_input_alphas,sum)
+   elseif self._accumulator == 'truncate' then 
+      -- normalize alphas to sum to one but truncate min val
+      alphas = win_input_alphas:add(
+         -win_input_alphas:min(2):expandAs(win_input_alphas)
+      )
+      alphas:cdiv(alphas:sum(2):expandAs(alphas))
+   else
+      error"Unknown accumulator"
+   end
+   -- alpha-weighted mean of activations to get outputs
+   local size = alphas:size():totable()
+   size[3] = 1
+   local outputs = torch.cmul(
+      torch.reshape(alphas, unpack(size)):expandAs(win_input_acts), 
+      win_input_acts
+   ):sum(2)[{{},1,{}}]
+   -- measure error
+   local criterion = self._criterion()
+   local output_error = criterion:forward(outputs, targets)
+   return output_error, outputs
 end
 
 function ESSRLCriterion:clone()

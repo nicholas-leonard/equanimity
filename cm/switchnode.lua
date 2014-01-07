@@ -61,7 +61,6 @@ function SwitchNode:get(index)
 end
 
 function SwitchNode:_forward(cstate)
-   --print(self:id():toString(), cstate)
    self.istate.act_double = self.istate.act:double()
    -- forward gater to get routes
    local gater_istate = {

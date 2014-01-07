@@ -68,7 +68,7 @@ function SwitchLayer:_forward(input_cstates)
       local node = self._nodes[input_idx]
       local nExperts = node:nExperts()
       local state = {
-         input=istate, global=self.global,
+         input=istate, global=self.gstate,
          carry=input_cstates[input_idx]
       }
       local ostates, cstates 

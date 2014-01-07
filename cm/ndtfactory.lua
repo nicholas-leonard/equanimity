@@ -92,7 +92,7 @@ function NDTFactory:buildModel(opt)
                dropout=self:buildDropout(opt.gater_dropout and 0.5),
                transfer=nn.Sigmoid(), n_sample=opt.n_sample,
                n_reinforce=opt.n_reinforce, n_eval=opt.n_eval,
-               epsilon=opt.epsilon
+               epsilon=opt.epsilon, lambda=opt.lambda, ema=opt.ema
             }
          )
          table.insert(nodes, dp.SwitchNode{gater=gater, experts=experts})

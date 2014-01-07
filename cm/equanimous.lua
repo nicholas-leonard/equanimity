@@ -13,7 +13,7 @@ Equanimous.isEquanimous = true
 function Equanimous:__init(config)
    config = config or {}
    local args, n_sample, n_reinforce, targets, transfer, 
-         epsilon, eval_proto
+         epsilon, eval_proto, lambda, ema
       = xlua.unpack(
       {config},
       'Equanimous', nil,
@@ -28,7 +28,13 @@ function Equanimous:__init(config)
       {arg='epsilon', type='number', default=0.1,
        help='probability of sampling from inverse distribution'},
       {arg='eval_proto', type='string', default='MAP',
-       help='evaluation protocol : MAP, Stochastic Sampling, etc'}
+       help='evaluation protocol : MAP, Stochastic Sampling, etc'},
+      --[[{arg='n_focus', type='number', 
+       help='nb of experts to focus on defaults to n_sample'},--]]
+      {arg='lambda', type='number', default=0, 
+       help='weight of inverse marginal expert multinomial dist'},
+      {arg='ema', type='number', default=0.5,
+       help='weight of present for computing exponential moving avg'}
    )
    config.typename = config.typename or 'equanimous'
    config.transfer = transfer
@@ -39,6 +45,8 @@ function Equanimous:__init(config)
    self._epsilon = epsilon
    self._eval_proto = eval_proto
    self._criterion = nn.MSECriterion()
+   self._lambda = lambda
+   self._ema = ema
    -- statistics :
    --- sparsity : 
    ---- distribution of alphas in bins
@@ -46,6 +54,7 @@ function Equanimous:__init(config)
    self._alpha_bins 
       = torch.range(1,n_bin):double():div(n_bin):storage():totable()
    self._alpha_dist = torch.DoubleTensor(n_bin)
+   self._ema_dist = torch.DoubleTensor(n_bin):zero()
    self:zeroStatistics()
 end
 
@@ -54,6 +63,14 @@ function Equanimous:setup(config)
 end   
 
 function Equanimous:_forward(cstate)
+   if self.gstate.focus == 'examples' then
+      self:_exampleFocus(cstate)
+   elseif self.gstate.focus == 'experts' then
+      self:_expertFocus(cstate)
+   end
+end
+
+function Equanimous:_exampleFocus(cstate)
    -- affine transform + transfer function
    parent._forward(self, cstate)
    self.ostate.act_double = self.ostate.act:double()
@@ -64,18 +81,28 @@ function Equanimous:_forward(cstate)
    local e_greedy = false
    if p >= self._epsilon then
       alphas = torch.add(self.ostate.act_double, -self._targets[1])
+      -- normalize each example's alphas to sum to one
       alphas:cdiv(alphas:sum(2):expandAs(alphas))
    else
       e_greedy = true
-      alphas = self._alpha_dist:clone()
-      -- reverse distribution and make unlikely alphas more likely
-      alphas:add(-alphas:max()):mul(-1):div(alphas:sum())
-      alphas = alphas:reshape(1,alphas:size(1)):expandAs(self.ostate.act_double)
+      alphas = dp.reverseDist(self._ema_dist):reshape(
+         1, self._ema_dist:size(1)
+      ):expandAs(self.ostate.act_double)
    end
    self.ostate.alphas = alphas
-   -- sample from a multinomial without replacement
+   -- equanimity bias
+   local biased_alphas = alphas
+   if self._lambda > 0 then
+      biased_alphas = torch.add(
+         torch.mul(alphas, 1-self._lambda), 
+         torch.mul(
+            dp.reverseDist(self._ema_dist), self._lambda
+         ):reshape(1,self._ema_dist:size(1)):expandAs(alphas)
+      )
+   end
+   -- sample experts from an example multinomial without replacement
    self.ostate.routes = dp.multinomial(
-      self.ostate.alphas, self._n_sample, true
+      biased_alphas, self._n_sample, true
    )
    -- gather stats
    if not e_greedy then
@@ -85,9 +112,37 @@ function Equanimous:_forward(cstate)
          self._alpha_dist[i] = self._alpha_dist[i] + current - previous
          previous = current
       end
+      -- exponential moving average of alphas
+      local current_mean = alphas:mean(1)
+      self._ema_dist = self._ema_dist:mul(1-self._ema)
+         + current_mean:div(current_mean:sum()):mul(self._ema)
    end
    self._sample_count = self._sample_count + alphas:size(1)
 end
+
+--[[function Equanimous:_expertFocus(cstate)
+   -- affine transform + transfer function
+   parent._forward(self, cstate)
+   self.ostate.act_double = self.ostate.act:double()
+   
+   local expert_dist = self._alpha_dist:clone()
+   -- reverse distribution and make unlikely alphas more likely
+   expert_dist:add(-expert_dist:max()):mul(-1):div(expert_dist:sum())
+   expert_dist = expert_dist:reshape(1,expert_dist:size(1)):expandAs(
+      self.ostate.act_double
+   )
+   
+   -- alphas are used to weigh a mean of leaf outputs
+   local alphas = torch.add(self.ostate.act_double, -self._targets[1])
+   -- normalize each expert's alphas to sum to one
+   alphas:cdiv(alphas:sum(1):expandAs(alphas))
+   self.ostate.alphas = alphas
+   -- sample examples from an expert multinomial without replacement
+   self.ostate.routes = dp.multinomial(
+      alphas:t(), self._n_sample, true
+   ):t()
+   
+end]]--
 
 function Equanimous:_backward(cstate, scale)
    local targets = self.ostate.act_double:clone():fill(self._targets[1])

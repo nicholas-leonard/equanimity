@@ -35,13 +35,16 @@ cmd:option('--outputDropout', false, 'apply dropout on outputs, requires "nnx" l
 cmd:option('--shareOutput', false, 'share parameters of output layer')
 cmd:option('--useDevice', 1, 'sets the device (GPU) to use for this hyperoptimization')
 cmd:option('--blockGater', false, 'when true, gater does not backpropagate into previous expert(s)')
-cmd:option('--epsilon', 0.1, 'probability of sampling from inverse distribution') 
 cmd:option('--firstDecay', 200, 'epoch at which learning rate is first decayed by a factor of 0.1')
 cmd:option('--secondDecay', 400, 'epoch at which learning rate is then decayed by another factor of 0.1')
 cmd:option('--collection', 'postgresql-backend hyperoptimization example 2', 'identifies a collection of related experiments')
 cmd:option('--hostname', 'localhost', 'hostname for this host')
 cmd:option('--pid', 0, 'identifies process on host. Only important that each process on same host have different names')
 cmd:option('--type', 'double', 'type: double | float | cuda')
+cmd:option('--validRatio', 1/6, 'proportion of train set used for validation')
+cmd:option('--epsilon', 0.1, 'probability of sampling from inverse distribution') 
+cmd:option('--lambda', 0, 'weight of inverse marginal expert multinomial dist')
+cmd:option('--ema', 0.5, 'weight of present for computing exponential moving avg')
 cmd:text()
 opt = cmd:parse(arg or {})
 
@@ -85,7 +88,10 @@ local hp = {
    n_eval = opt.nEval,
    n_reinforce = opt.nReinforce,
    epsilon = opt.epsilon,
+   lambda = opt.lambda,
+   ema = opt.ema,
    share_output = opt.shareOutput,
+   valid_ratio = opt.validRatio
 }
 
 local pg = dp.Postgres()

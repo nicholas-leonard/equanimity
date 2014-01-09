@@ -40,6 +40,8 @@ function NDTFactory:buildModel(opt)
          opt.gater_width_scales[layer_idx] 
          * opt.gater_width/opt.n_branch^(layer_idx-1)
       )
+      local expert_lrs = opt.expert_learn_scales[layer_idx] 
+      local gater_lrs = opt.gater_learn_scales[layer_idx] 
       print(n_nodes*opt.n_branch..' experts with '
             ..expert_size..' hidden neurons')
       print(n_nodes..' gaters with '..gater_size..' hidden neurons')
@@ -50,14 +52,16 @@ function NDTFactory:buildModel(opt)
             local expert = dp.Neural{
                input_size=input_size, output_size=expert_size,
                transfer=self:buildTransfer(opt.activation),
-               dropout=self:buildDropout(opt.expert_dropout and 0.5)
+               dropout=self:buildDropout(opt.expert_dropout and 0.5),
+               mvstate={learn_scale=expert_lrs}
             }
             if layer_idx == opt.n_switch_layer then
                -- last layer of experts is 2-layer MLP
                local output = dp.Neural{
                   input_size=expert_size, output_size=#opt.classes,
                   transfer=nn.LogSoftMax(),
-                  dropout=self:buildDropout(opt.output_dropout and 0.5)
+                  dropout=self:buildDropout(opt.output_dropout and 0.5),
+                  mvstate={learn_scale=expert_lrs}
                }
                -- share output params (convolve output layer on experts)
                if opt.share_output then
@@ -79,7 +83,8 @@ function NDTFactory:buildModel(opt)
                dp.Neural{
                   input_size=input_size, output_size=gater_size,
                   transfer=self:buildTransfer(opt.activation),
-                  dropout=self:buildDropout(opt.gater_dropout and 0.5)
+                  dropout=self:buildDropout(opt.gater_dropout and 0.5),
+                  mvstate={learn_scale=gater_lrs}
                }
             )
             g_input_size = gater_size
@@ -92,7 +97,8 @@ function NDTFactory:buildModel(opt)
                dropout=self:buildDropout(opt.gater_dropout and 0.5),
                transfer=nn.Sigmoid(), n_sample=opt.n_sample,
                n_reinforce=opt.n_reinforce, n_eval=opt.n_eval,
-               epsilon=opt.epsilon, lambda=opt.lambda, ema=opt.ema
+               epsilon=opt.epsilon, lambda=opt.lambda, ema=opt.ema,
+               mvstate={learn_scale=gater_lrs}
             }
          )
          table.insert(nodes, dp.SwitchNode{gater=gater, experts=experts})
@@ -116,10 +122,16 @@ function NDTFactory:buildModel(opt)
 end
 
 function NDTFactory:buildOptimizer(opt)
-   return dp.Conditioner{
+   local optimizer_name = 'Conditioner'
+   if opt.equanimity then
+      optimizer_name = 'Equanimizer'
+   end
+   return dp[optimizer_name]{
       criterion = nn.ESSRLCriterion{
          n_reinforce=opt.n_reinforce, n_sample=opt.n_output_sample,
-         n_classes=#opt.classes, n_leaf=opt.n_leaf
+         n_classes=#opt.classes, n_leaf=opt.n_leaf, welfare=opt.welfare,
+         n_eval=opt.n_eval, n_backprop=opt.n_backprop,
+         accumulator=opt.accumulator
       },
       visitor = self:buildVisitor(opt),
       feedback = dp.Confusion(),
@@ -134,7 +146,8 @@ function NDTFactory:buildValidator(opt)
    return dp.Shampoo{
       criterion = nn.ESSRLCriterion{
          n_reinforce=opt.n_reinforce, n_sample=opt.n_output_sample,
-         n_classes=#opt.classes, n_leaf=opt.n_leaf
+         n_classes=#opt.classes, n_leaf=opt.n_leaf, n_eval=opt.n_eval, 
+         n_backprop=opt.n_backprop, accumulator=opt.accumulator
       },
       feedback = dp.Confusion(),  
       sampler = dp.Sampler{batch_size=1024, sample_type=opt.model_type}
@@ -145,7 +158,8 @@ function NDTFactory:buildTester(opt)
    return dp.Shampoo{
       criterion = nn.ESSRLCriterion{
          n_reinforce=opt.n_reinforce, n_sample=opt.n_output_sample,
-         n_classes=#opt.classes, n_leaf=opt.n_leaf
+         n_classes=#opt.classes, n_leaf=opt.n_leaf, n_eval=opt.n_eval, 
+         n_backprop=opt.n_backprop, accumulator=opt.accumulator
       },
       feedback = dp.Confusion(),  
       sampler = dp.Sampler{batch_size=1024, sample_type=opt.model_type}

@@ -10,7 +10,8 @@ cmd:text('$> th pgndt.lua --collection "MNIST-NDT-2" --hostname "nps" --pid 1 --
 cmd:text('Options:')
 cmd:option('--nEval', 1, 'number of experts chosen during evaluation')
 cmd:option('--nSample', 2, 'number of experts sampled during training')
-cmd:option('--nReinforce', 1, 'number of experts reinforced during training')
+cmd:option('--nReinforce', 1, 'number of experts reinforced per example during training')
+cmd:option('--nBackprop', 1, 'number of experts backpropagated per example during training')
 cmd:option('--nBranch', 8, 'number of expert branches per node')
 cmd:option('--nSwitchLayer', 1, 'number of switchlayers in the tree')
 cmd:option('--learningRate', 0.01, 'learning rate at epoch 0')
@@ -20,8 +21,10 @@ cmd:option('--momentum', 0, 'momentum factor')
 cmd:option('--nesterov', false, 'use nesterov momentum')
 cmd:option('--expertWidth', 1024, 'width of trunk and combined width of experts times expert width scale')
 cmd:option('--expertWidthScales', '{1,1,1}', 'see expertWidth')
+cmd:option('--expertLearnScales', '{1,1,1}', 'scales the learning rate')
 cmd:option('--gaterWidth', 256, 'width of gater and combinded width of gaters times gater scale factor')
 cmd:option('--gaterWidthScales', '{1,2,2}', 'see gaterWidth')
+cmd:option('--gaterLearnScales', '{1,1,1}', 'scales the learning rate')
 cmd:option('--gaterDept', '{2,2,2}', 'dept of gaters in different layers')
 cmd:option('--activation', 'Tanh', 'activation function')
 cmd:option('--batchSize', 32, 'number of examples per batch')
@@ -45,6 +48,9 @@ cmd:option('--validRatio', 1/6, 'proportion of train set used for validation')
 cmd:option('--epsilon', 0.1, 'probability of sampling from inverse distribution') 
 cmd:option('--lambda', 0, 'weight of inverse marginal expert multinomial dist')
 cmd:option('--ema', 0.5, 'weight of present for computing exponential moving avg')
+cmd:option('--capitalize', false, 'backpropagate through the best experts per example')
+cmd:option('--equanimity', false, 'add a second optimization phase that focuses on experts instead of examples')
+cmd:option('--accumulator', 'softmax', 'softmax | normalize')
 cmd:text()
 opt = cmd:parse(arg or {})
 
@@ -57,7 +63,7 @@ end
 --[[ hyperparameters ]]--
 
 local hp = {
-   version = 1,
+   version = 2,
    max_tries = opt.maxTries,
    max_epoch = opt.maxEpoch,
    model_type = opt.type,
@@ -77,7 +83,9 @@ local hp = {
    gater_width = opt.gaterWidth,
    gater_dept = table.fromString(opt.gaterDept),
    expert_width_scales = table.fromString(opt.expertWidthScales),
+   expert_learn_scales = table.fromString(opt.expertLearnScales),
    gater_width_scales = table.fromString(opt.gaterWidthScales),
+   gater_learn_scales = table.fromString(opt.gaterLearnScales),
    activation = opt.activation,
    input_dropout = opt.inputDropout,
    expert_dropout = opt.expertDropout,
@@ -87,11 +95,18 @@ local hp = {
    n_sample = opt.nSample,
    n_eval = opt.nEval,
    n_reinforce = opt.nReinforce,
+   n_backprop = opt.nBackprop,
    epsilon = opt.epsilon,
    lambda = opt.lambda,
    ema = opt.ema,
+   welfare = (not opt.capitalize),
    share_output = opt.shareOutput,
-   valid_ratio = opt.validRatio
+   valid_ratio = opt.validRatio,
+   equanimity = opt.equanimity,
+   accumulator = opt.accumulator,
+   pid = opt.pid,
+   hostname = opt.hostname,
+   collection = opt.collection
 }
 
 local pg = dp.Postgres()

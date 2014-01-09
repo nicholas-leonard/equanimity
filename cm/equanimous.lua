@@ -150,13 +150,11 @@ function Equanimous:_expertFocus(cstate)
    local probs = torch.cdiv(alphas, alphas:sum(1):expandAs(alphas))
    local experts = {}
    local start2 = os.clock()
+   local n_sample = math.max(2, math.ceil(expert_dist:max()))
+   local samples = dp.multinomial(probs:t(), n_sample, false)
    for expert_idx = 1,expert_dist:size(1) do
-      -- sample examples from an expert multinomial without replacement
-      local expert_indices = dp.multinomial(
-         probs:select(2, expert_idx), 
-         math.max(2, math.ceil(expert_dist[expert_idx])), 
-         false
-      )
+      local n_sample = math.max(2, math.ceil(expert_dist[expert_idx]))
+      local expert_indices = samples[{expert_idx,{1,n_sample}}]
       experts[expert_idx] = {expert_indices = expert_indices}
    end
    --print("example2", os.clock()-start2)

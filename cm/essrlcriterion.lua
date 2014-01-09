@@ -74,6 +74,7 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
    local size = {n_example, self._n_sample}
    local input_experts = torch.LongTensor(unpack(size))
    local input_alphas = torch.DoubleTensor(unpack(size))
+   -- original indices of example in expert mini-batch
    local input_origins = torch.LongTensor(unpack(size))
    local batch = {}
    for expert_idx, expert_ostate in pairs(expert_ostates) do
@@ -200,7 +201,7 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
             -- backprop through criterion
             expert.grads[origin_idx] = self._criterion:backward(
                act, targets[batch_idx]
-            )
+            ):clone()
             table.insert(expert.backprop, origin_idx)
          end
          -- reinforce stronger experts in gater
@@ -284,7 +285,7 @@ function ESSRLCriterion:expertFocus(expert_ostates, targets, indices)
       local backprop_grads = self._criterion:backward(
          expert_acts:index(1, backprop_indices), 
          expert_targets:index(1, backprop_indices)
-      )
+      ):clone()
       expert_grads:indexCopy(1, backprop_indices, backprop_grads)
       expert_ostate.grad = expert_grads:type(expert_ostate.act:type())
    end

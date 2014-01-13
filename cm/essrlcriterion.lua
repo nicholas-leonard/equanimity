@@ -12,7 +12,8 @@ local ESSRLCriterion, parent = torch.class("nn.ESSRLCriterion")
 function ESSRLCriterion:__init(config)
    config = config or {}
    local args, n_sample, n_leaf, n_reinforce, n_backprop, n_eval, 
-         n_classes, criterion, accumulator, welfare = xlua.unpack(
+         n_classes, criterion, accumulator, backprop_pad
+      = xlua.unpack(
       {config},
       'ESSRLCriterion', nil,
       {arg='n_sample', type='number', 
@@ -30,8 +31,10 @@ function ESSRLCriterion:__init(config)
       {arg='criterion', type='nn.Criterion', default=nn.ClassNLLCriterion,
        help='Criterion to be used for optimizing winning experts'},
       {arg='accumulator', type='string', default='softmax'},
-      {arg='welfare', type='boolean', default=true,
-       help='backpropagate through the worst experts per example'}
+      {arg='backprop_pad', type='number', default=0,
+       help='number of experts with least error to ignore before '..
+       'backpropagating through n_backprop experts. Used to keep '..
+       'lesser experts in the game.'}
    )
    -- we expect the criterion to be stateless (we use it as a function)
    self._criterion = criterion()
@@ -44,7 +47,7 @@ function ESSRLCriterion:__init(config)
    self._n_eval = n_eval
    self._n_classes = n_classes
    self._accumulator = accumulator
-   self._welfare = welfare
+   self._backprop_pad = backprop_pad
    -- statistics :
    --- monopoly : 
    ---- distribution of examples to experts
@@ -103,10 +106,10 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       end
    end
    for batch_idx, example in pairs(batch) do
-      -- sort each example's experts by descending err (welfare == true)
+      -- sort each example's experts by descending err
       local example_errors, idxs = torch.DoubleTensor(
          example.errors
-      ):sort(1, self._welfare)
+      ):sort(1, false)
       assert(example_errors:size(1) == self._n_sample)
       local example_acts = torch.DoubleTensor(
          #example.acts, self._n_classes
@@ -116,14 +119,14 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       end
       local example_targets 
          = torch.LongTensor(example.targets):index(1, idxs)
-      local target = example_targets[1]
+      local target = example_targets[1+self._backprop_pad]
       local example_experts 
          = torch.LongTensor(example.experts):index(1, idxs)
-      local expert_idx = example_experts[1]
+      local expert_idx = example_experts[1+self._backprop_pad]
       -- gater stats
       self._spec_matrix[{expert_idx, target}] 
             = self._spec_matrix[{expert_idx, target}] + 1 
-      local err = example_errors[1]
+      local err = example_errors[1+self._backprop_pad]
       self._err_matrix[{expert_idx, target}] 
             = self._err_matrix[{expert_idx, target}] + err
       local example_alphas = torch.DoubleTensor(example.alphas)
@@ -139,9 +142,6 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
    -- reinforce the winners.
    -- keep n_reinforce winners
    local sub = {1,self._n_eval}
-   if self._welfare then
-      sub = {self._n_sample-self._n_eval+1, self._n_sample}
-   end
    local win_input_acts = input_acts[{{},sub,{}}]
    local win_input_alphas = input_alphas[{{},sub}]
    local alphas
@@ -194,8 +194,9 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
          table.insert(expert.origins, origin_idx)
          -- focus backprop on first experts (see forward() for order)
          -- some expert-example pairs have no grad (dont learn)
-         if sample_idx <= self._n_backprop then
-            local act = self._input_acts:select(1,batch_idx):select(
+         if sample_idx > self._backprop_pad 
+               and sample_idx <= self._n_backprop then
+            local act = self._input_acts:select(1, batch_idx):select(
                1, sample_idx
             )
             -- backprop through criterion
@@ -205,14 +206,8 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
             table.insert(expert.backprop, origin_idx)
          end
          -- reinforce stronger experts in gater
-         if self._welfare then
-            if sample_idx >= n_sample - self._n_reinforce + 1 then
-               table.insert(expert.reinforce, origin_idx)
-            end
-         else
-            if sample_idx <= self._n_reinforce then
-               table.insert(expert.reinforce, origin_idx)
-            end
+         if sample_idx <= self._n_reinforce then
+            table.insert(expert.reinforce, origin_idx)
          end
          experts[expert_idx] = expert
       end

@@ -48,7 +48,7 @@ cmd:option('--validRatio', 1/6, 'proportion of train set used for validation')
 cmd:option('--epsilon', 0.1, 'probability of sampling from inverse distribution') 
 cmd:option('--lambda', 0, 'weight of inverse marginal expert multinomial dist')
 cmd:option('--ema', 0.5, 'weight of present for computing exponential moving avg')
-cmd:option('--capitalize', false, 'backpropagate through the best experts per example')
+cmd:option('--backpropPad', 1, 'dont backpropagate through the backpropPad best experts per example (padding)')
 cmd:option('--equanimity', false, 'add a second optimization phase that focuses on experts instead of examples')
 cmd:option('--accumulator', 'softmax', 'softmax | normalize')
 cmd:option('--trunkLearnScale', 1, 'learning rate scale for the trunk layer')
@@ -102,7 +102,7 @@ local hp = {
    epsilon = opt.epsilon,
    lambda = opt.lambda,
    ema = opt.ema,
-   welfare = (not opt.capitalize),
+   backprop_pad = opt.backpropPad,
    share_output = opt.shareOutput,
    valid_ratio = opt.validRatio,
    equanimity = opt.equanimity,

@@ -30,7 +30,10 @@ print(opt)
 id_gen = dp.EIDGenerator('mypc.pid')
 
 --[[Load DataSource]]--
-datasource = dp.Cifar10()
+--datasource = dp.Mnist{input_preprocess=dp.LeCunLCN{}}
+--datasource = dp.Cifar10{}
+datasource = dp.Cifar10{input_preprocess=dp.LeCunLCN{}}
+
 
 --[[Model]]--
 local dropout

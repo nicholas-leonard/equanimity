@@ -4,12 +4,10 @@
 local Conditioner, parent = torch.class("dp.Conditioner", "dp.Optimizer")
 
 function Conditioner:propagateBatch(batch, report)   
-   --if true then return end
    local model = self._model
-   --[[ Phase 1 : Focus on examples ]]--
    --[[ feedforward ]]--
    -- evaluate function for complete mini batch
-   local batch_indices = torch.range(1,batch:nSample())
+   local batch_indices = torch.range(1,batch:nSample()):long()
    
    local ostates = model:forward{
       input=batch:inputs(), carry={batch_indices=batch_indices},
@@ -38,7 +36,8 @@ function Conditioner:propagateBatch(batch, report)
       ostates, batch:targets(), batch:indices()
    )
    model:backward{
-      output=istates, carry=cstates, global={focus='examples'}
+      output=istates, carry=cstates, 
+      global={focus='examples', scale=1/batch:nSample()}
    }
    
    --[[ update parameters ]]--
@@ -49,10 +48,6 @@ function Conditioner:propagateBatch(batch, report)
    self._mediator:publish(self:id():name() .. ':' .. "doneBatch", 
                           report, batch)
                           
-   --[[ Phase 2 : Focus on experts ]]--
-   -- sample a batch of experts for phase 2
-   --local experts = self._expert_sampler:sampleBatch()
-   --gstate = {focus='experts'}
 end
 
 function Conditioner:report()
@@ -67,6 +62,55 @@ function Conditioner:resetLoss()
 end
 
 ------------------------------------------------------------------------
+--[[ Equanimizer ]]--
+-- Adds a second training phase to Conditioner.
+-- It focuses on experts in order to impose an equanimous 
+-- constraint that balances the distribution of expert-examples.
+------------------------------------------------------------------------
+local Equanimizer, parent = torch.class("dp.Equanimizer", "dp.Conditioner")
+
+--[[function Equanimizer:__init(config)
+   config = config or {}
+   local args, xlua.unpack(
+      {config},
+      'Equanimizer', 
+      'Adds a second training phase to Conditioner. '..
+      'It focuses on experts in order to impose an equanimous '..
+      'constraint that balances the distribution of expert-examples.',
+   )
+   parent._init(config)
+end--]]
+
+function Equanimizer:propagateBatch(batch, report) 
+   -- focus on examples
+   parent.propagateBatch(self, batch, report)
+   
+   -- focus on experts
+   local model = self._model
+   --[[ feedforward ]]--
+   -- evaluate function for complete mini batch
+   local batch_indices = torch.range(1,batch:nSample()):long()
+   
+   local ostates = model:forward{
+      input=batch:inputs(), carry={batch_indices=batch_indices},
+      global={focus='experts'}
+   }
+      
+   --[[ backpropagate ]]--
+   local istates, cstates = self._criterion:expertFocus(
+      ostates, batch:targets(), batch:indices()
+   )
+   model:backward{
+      output=istates, carry=cstates, 
+      global={focus='examples', scale=1/batch:nSample()}
+   }
+   
+   --[[ update parameters ]]--
+   model:accept(self._visitor)
+   model:doneBatch()
+end
+
+------------------------------------------------------------------------
 --[[ Shampoo ]]--
 ------------------------------------------------------------------------
 local Shampoo, parent = torch.class("dp.Shampoo", "dp.Evaluator")
@@ -75,7 +119,7 @@ function Shampoo:propagateBatch(batch, report)
    local model = self._model
    --[[ feedforward ]]--
    -- evaluate function for complete mini batch
-   local batch_indices = torch.range(1,batch:nSample())
+   local batch_indices = torch.range(1,batch:nSample()):long()
    
    local ostates = model:evaluate{
       input=batch:inputs(), carry={batch_indices=batch_indices}
@@ -99,4 +143,15 @@ function Shampoo:propagateBatch(batch, report)
       self:id():name() .. ':' .. "doneFeedback", report, batch
    )
    model:doneBatch()
+end
+
+function Shampoo:report()
+   local report = parent.report(self)
+   report.essrl = self._criterion:report()
+   return report
+end
+
+function Shampoo:resetLoss()
+   parent.resetLoss(self)
+   self._criterion:resetStatistics()
 end

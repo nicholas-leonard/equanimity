@@ -11,8 +11,8 @@ local ESSRLCriterion, parent = torch.class("nn.ESSRLCriterion")
 
 function ESSRLCriterion:__init(config)
    config = config or {}
-   local args, n_sample, n_leaf, n_reinforce, n_eval, n_classes, 
-         criterion, accumulator = xlua.unpack(
+   local args, n_sample, n_leaf, n_reinforce, n_backprop, n_eval, 
+         n_classes, criterion, accumulator, welfare = xlua.unpack(
       {config},
       'ESSRLCriterion', nil,
       {arg='n_sample', type='number', 
@@ -21,27 +21,37 @@ function ESSRLCriterion:__init(config)
        help='number of  leaf experts in the neural decision tree'},
       {arg='n_reinforce', type='number', 
        help='number of experts reinforced per example during training.'},
+      {arg='n_backprop', type='number', 
+       help='number of experts backproped per example during training.'},
       {arg='n_eval', type='number', 
        help='number of experts chosen per example during evaluation.'},
       {arg='n_classes', type='number',
        help='number of classes'},
       {arg='criterion', type='nn.Criterion', default=nn.ClassNLLCriterion,
        help='Criterion to be used for optimizing winning experts'},
-      {arg='accumulator', type='string', default='softmax'}
+      {arg='accumulator', type='string', default='softmax'},
+      {arg='welfare', type='boolean', default=true,
+       help='backpropagate through the worst experts per example'}
    )
-   self._criterion = criterion
+   -- we expect the criterion to be stateless (we use it as a function)
+   self._criterion = criterion()
+   -- stop torch from scaling grads based on batch_size (we do so later)
+   self._criterion.sizeAverage = false
    self._n_reinforce = n_reinforce
+   self._n_backprop = n_backprop or n_reinforce
    self._n_sample = n_sample
    self._n_leaf = n_leaf
    self._n_eval = n_eval
    self._n_classes = n_classes
    self._accumulator = accumulator
+   self._welfare = welfare
    -- statistics :
    --- monopoly : 
    ---- distribution of examples to experts
    self._reinforce_dist = torch.DoubleTensor(self._n_leaf)
    self._sample_dist = torch.DoubleTensor(self._n_leaf)
    --- specialization :
+   ---- records distribution of backprops (train) or samples (eval)
    self._spec_matrix = torch.DoubleTensor(self._n_leaf, self._n_classes) 
    self._err_matrix = torch.DoubleTensor(self._n_leaf, self._n_classes) 
    self:resetStatistics()
@@ -64,6 +74,7 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
    local size = {n_example, self._n_sample}
    local input_experts = torch.LongTensor(unpack(size))
    local input_alphas = torch.DoubleTensor(unpack(size))
+   -- original indices of example in expert mini-batch
    local input_origins = torch.LongTensor(unpack(size))
    local batch = {}
    for expert_idx, expert_ostate in pairs(expert_ostates) do
@@ -79,13 +90,11 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
                criteria={}, alphas={}, origins={}
             }        
             local act = expert_ostate.act_double[{i,{}}]
-            local criterion = self._criterion()
             local target = targets[batch_idx] 
-            local err = criterion:forward(act, target)
+            local err = self._criterion:forward(act, target)
             table.insert(example.experts, expert_idx)
             table.insert(example.targets, target)
             table.insert(example.acts, act)
-            table.insert(example.criteria, criterion)
             table.insert(example.errors, err)
             table.insert(example.alphas, expert_ostate.alphas[i])
             table.insert(example.origins, i)
@@ -94,10 +103,10 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       end
    end
    for batch_idx, example in pairs(batch) do
-      -- sort each example's experts by ascending error
+      -- sort each example's experts by descending err (welfare == true)
       local example_errors, idxs = torch.DoubleTensor(
          example.errors
-      ):sort(1, true)
+      ):sort(1, self._welfare)
       assert(example_errors:size(1) == self._n_sample)
       local example_acts = torch.DoubleTensor(
          #example.acts, self._n_classes
@@ -111,6 +120,7 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       local example_experts 
          = torch.LongTensor(example.experts):index(1, idxs)
       local expert_idx = example_experts[1]
+      -- gater stats
       self._spec_matrix[{expert_idx, target}] 
             = self._spec_matrix[{expert_idx, target}] + 1 
       local err = example_errors[1]
@@ -122,23 +132,18 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       input_experts[{batch_idx,{}}] = example_experts
       input_alphas[{batch_idx,{}}] = example_alphas:index(1, idxs)
       input_origins[{batch_idx,{}}] = example_origins:index(1, idxs)
-      -- reorder criteria and keep only winning for backward pass
-      local criteria = {}
-      for sample_idx = 1,input_experts:size(2) do
-         if sample_idx > self._n_reinforce then
-            break
-         end
-         table.insert(criteria, example.criteria[idxs[sample_idx]])
-      end
    end
    -- For each example, reinforce winning experts (those that have 
    -- least error) by allowing them to learn and backward-propagating
    -- the indices of winning experts for use by the gaters which will
    -- reinforce the winners.
    -- keep n_reinforce winners
-   local win_input_acts = input_acts[{{},{1,self._n_reinforce},{}}]
-   local win_input_experts = input_experts[{{},{1,self._n_reinforce}}]
-   local win_input_alphas = input_alphas[{{},{1,self._n_reinforce}}]
+   local sub = {1,self._n_eval}
+   if self._welfare then
+      sub = {self._n_sample-self._n_eval+1, self._n_sample}
+   end
+   local win_input_acts = input_acts[{{},sub,{}}]
+   local win_input_alphas = input_alphas[{{},sub}]
    local alphas
    if self._accumulator == 'softmax' then
       -- normalize alphas using softmax
@@ -165,15 +170,126 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       win_input_acts
    ):sum(2)[{{},1,{}}]
    -- measure error
-   local criterion = self._criterion()
-   local output_error = criterion:forward(outputs, targets)
+   local output_error = self._criterion:forward(outputs, targets)
    -- store for backward pass
    self._input_acts = input_acts
    self._input_experts = input_experts
    self._input_origins = input_origins
-   self._win_input_experts = win_input_experts
    self._batch = batch
    return output_error, outputs
+end
+
+function ESSRLCriterion:backward(expert_ostates, targets, indices)
+   --regroup by experts
+   local experts = {}
+   for batch_idx = 1,self._input_experts:size(1) do
+      local example = self._batch[batch_idx]
+      local n_sample = self._input_experts:size(2)
+      for sample_idx = 1,n_sample do
+         local expert_idx = self._input_experts[{batch_idx,sample_idx}]
+         local origin_idx = self._input_origins[{batch_idx,sample_idx}]
+         local expert = experts[expert_idx] or {
+            reinforce={}, grads={}, origins={}, backprop={}
+         }
+         table.insert(expert.origins, origin_idx)
+         -- focus backprop on first experts (see forward() for order)
+         -- some expert-example pairs have no grad (dont learn)
+         if sample_idx <= self._n_backprop then
+            local act = self._input_acts:select(1,batch_idx):select(
+               1, sample_idx
+            )
+            -- backprop through criterion
+            expert.grads[origin_idx] = self._criterion:backward(
+               act, targets[batch_idx]
+            ):clone()
+            table.insert(expert.backprop, origin_idx)
+         end
+         -- reinforce stronger experts in gater
+         if self._welfare then
+            if sample_idx >= n_sample - self._n_reinforce + 1 then
+               table.insert(expert.reinforce, origin_idx)
+            end
+         else
+            if sample_idx <= self._n_reinforce then
+               table.insert(expert.reinforce, origin_idx)
+            end
+         end
+         experts[expert_idx] = expert
+      end
+   end
+   local cstates = {}
+   for expert_idx, expert_ostate in pairs(expert_ostates) do
+      local expert = experts[expert_idx]
+      -- reorder to original order of examples in batch
+      local idxs = torch.LongTensor(expert.origins)
+      -- gather statistics
+      self._reinforce_dist[expert_idx] 
+         = self._reinforce_dist[expert_idx] + #expert.reinforce
+      -- gradients
+      local grad = expert_ostate.act_double:clone():zero()
+      for origin_idx, example_grad in pairs(expert.grads) do
+         grad[{{origin_idx},{}}] = example_grad 
+      end
+      cstates[expert_idx] = {
+         batch_indices = expert_ostate.batch_indices,
+         reinforce_indices = expert.reinforce,
+         backprop_indices = expert.backprop
+      }
+      expert_ostate.grad = grad:type(expert_ostate.act:type())
+   end
+   return expert_ostates, cstates
+end
+
+function ESSRLCriterion:expertFocus(expert_ostates, targets, indices)
+   assert(type(expert_ostates) == 'table')
+   assert(torch.isTensor(targets))
+   assert(torch.isTensor(indices))
+   -- per batch, we should reinforce about as many expert-example 
+   -- pairs as during the exampleFocus phase, 
+   -- i.e. n_reinforce * batch_size out of n_sample * batch_size
+   local reinforce_factor = self._n_reinforce/self._n_sample
+   local backprop_factor = self._n_backprop/self._n_sample
+   local cstates = {}
+   for expert_idx, expert_ostate in pairs(expert_ostates) do
+      local batch_indices = expert_ostate.batch_indices
+      local n_example = batch_indices:size(1)
+      local expert_acts = expert_ostate.act:double()
+      -- measure individual errors 
+      local expert_targets = targets:index(1, batch_indices)
+      local expert_errors = expert_targets:clone()
+      for sample_idx = 1,n_example do
+         expert_errors[sample_idx] = self._criterion:forward(
+            expert_acts[{sample_idx,{}}], expert_targets[sample_idx]
+         )
+      end
+      -- sort each expert's examples by ascending error
+      local expert_errors, idxs = expert_errors:sort(1)
+      -- have gater learn examples with least error
+      local n_reinforce = math.max(
+         1, math.floor(reinforce_factor * n_example)
+      )
+      -- have expert learn examples with least error (specialize)
+      local n_backprop = math.max(
+         1, math.floor(backprop_factor * n_example)
+      )
+      local reinforce_indices = idxs[{{1,n_reinforce}}]
+      local backprop_indices = idxs[{{1,n_backprop}}]
+      cstates[expert_idx] = {
+         batch_indices = expert_ostate.batch_indices,
+         reinforce_indices = reinforce_indices:storage():totable(),
+         backprop_indices = backprop_indices:storage():totable()
+      }
+      
+      -- backpropagate criteria of least-error examples for expert
+      local expert_grads = expert_acts:clone():zero()
+      local backprop_grads = self._criterion:backward(
+         expert_acts:index(1, backprop_indices), 
+         expert_targets:index(1, backprop_indices)
+      ):clone()
+      expert_grads:indexCopy(1, backprop_indices, backprop_grads)
+      expert_ostate.grad = expert_grads:type(expert_ostate.act:type())
+   end
+   return expert_ostates, cstates
 end
 
 function ESSRLCriterion:evaluate(expert_ostates, targets, indices)
@@ -191,13 +307,20 @@ function ESSRLCriterion:evaluate(expert_ostates, targets, indices)
          self._sample_dist[expert_idx] 
             = self._sample_dist[expert_idx] + expert_ostate.act:size(1)
          expert_ostate.act_double = expert_ostate.act:double()
-         --print('act', expert_ostate.act_double)
-         --print('alphas', expert_ostate.alphas)
          for i = 1, expert_ostate.batch_indices:size(1) do
             local batch_idx = expert_ostate.batch_indices[i]
-            local example = batch[batch_idx] or {acts={}, alphas={}}  
-            table.insert(example.acts, expert_ostate.act_double[{i,{}}])
+            local example = batch[batch_idx] 
+               or {acts={},alphas={},errors={},targets={},experts={}}  
+            local act = expert_ostate.act_double[{i,{}}]
+            table.insert(example.acts, act)
             table.insert(example.alphas, expert_ostate.alphas[i])
+            -- for stats gathering
+            local target = targets[batch_idx]
+            table.insert(
+               example.errors, self._criterion:forward(act, target)
+            )
+            table.insert(example.targets, target)
+            table.insert(example.experts, expert_idx)
             batch[batch_idx] = example
          end
       end
@@ -216,6 +339,14 @@ function ESSRLCriterion:evaluate(expert_ostates, targets, indices)
       end
       input_acts[{batch_idx, {}, {}}] = example_acts:index(1, idxs)
       input_alphas[{batch_idx,{}}] = example_alphas
+      -- gather stats
+      local target = example.targets[idxs[1]]
+      local expert_idx = example.experts[idxs[1]]
+      self._spec_matrix[{expert_idx, target}] 
+            = self._spec_matrix[{expert_idx, target}] + 1 
+      local err = example.errors[idxs[1]]
+      self._err_matrix[{expert_idx, target}] 
+            = self._err_matrix[{expert_idx, target}] + err
    end
    local win_input_acts = input_acts[{{},{1,self._n_eval},{}}]
    local win_input_alphas = input_alphas[{{},{1,self._n_eval}}]
@@ -245,68 +376,8 @@ function ESSRLCriterion:evaluate(expert_ostates, targets, indices)
       win_input_acts
    ):sum(2)[{{},1,{}}]
    -- measure error
-   local criterion = self._criterion()
-   local output_error = criterion:forward(outputs, targets)
+   local output_error = self._criterion:forward(outputs, targets)
    return output_error, outputs
-end
-
-function ESSRLCriterion:backward(expert_ostates, targets, indices)
-   --regroup by experts
-   local experts = {}
-   for batch_idx = 1,self._input_experts:size(1) do
-      local example = self._batch[batch_idx]
-      local n_sample = self._input_experts:size(2)
-      for sample_idx = 1,n_sample do
-         local expert_idx = self._input_experts[{batch_idx,sample_idx}]
-         local origin_idx = self._input_origins[{batch_idx,sample_idx}]
-         local expert = experts[expert_idx] or {
-            reinforce={}, grads={}, origins={}
-         }
-         table.insert(expert.origins, origin_idx)
-         -- non-reinforce expert-example pairs have no grad (dont learn)
-         local grad = false
-         if sample_idx <= self._n_reinforce then
-            local criterion = example.criteria[sample_idx]
-            local act = self._input_acts:select(1,batch_idx):select(
-               1, sample_idx
-            )
-            -- backprop through criterion
-            grad = criterion:backward(act, targets[batch_idx])
-            --table.insert(expert.reinforce, origin_idx)
-         end
-         if sample_idx > n_sample - self._n_reinforce then
-            table.insert(expert.reinforce, origin_idx)
-         end
-         table.insert(expert.grads, grad)
-         experts[expert_idx] = expert
-      end
-   end
-   local cstates = {}
-   for expert_idx, expert_ostate in pairs(expert_ostates) do
-      local expert = experts[expert_idx]
-      -- reorder to original order of examples in batch
-      local idxs = torch.LongTensor(expert.origins)
-      -- gather statistics
-      self._reinforce_dist[expert_idx] 
-         = self._reinforce_dist[expert_idx] + #expert.reinforce
-      cstates[expert_idx] = {
-         batch_indices = expert_ostate.batch_indices,
-         reinforce_indices = expert.reinforce
-      }
-      local grad = expert_ostate.act_double:clone():zero()
-      for batch_idx, example_grad in ipairs(expert.grads) do
-         if example_grad then
-            grad[{{batch_idx},{}}] = example_grad 
-         end
-      end
-      --local grad = grad:type(expert_ostate.acts:type())
-      expert_ostate.grad = grad:clone()
-      expert_ostate.grad:indexCopy(1, idxs, grad)
-      expert_ostate.grad = expert_ostate.grad:type(
-         expert_ostate.act:type()
-      )
-   end
-   return expert_ostates, cstates
 end
 
 function ESSRLCriterion:clone()

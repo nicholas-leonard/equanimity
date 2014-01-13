@@ -51,6 +51,8 @@ cmd:option('--ema', 0.5, 'weight of present for computing exponential moving avg
 cmd:option('--capitalize', false, 'backpropagate through the best experts per example')
 cmd:option('--equanimity', false, 'add a second optimization phase that focuses on experts instead of examples')
 cmd:option('--accumulator', 'softmax', 'softmax | normalize')
+cmd:option('--trunkLearnScale', 1, 'learning rate scale for the trunk layer')
+cmd:option('--gaterGradScale', 1, 'what to multiply gater grad by before adding it to grad sent to previous layer expert or trunk')
 cmd:text()
 opt = cmd:parse(arg or {})
 
@@ -82,6 +84,7 @@ local hp = {
    expert_width = opt.expertWidth,
    gater_width = opt.gaterWidth,
    gater_dept = table.fromString(opt.gaterDept),
+   trunk_learn_scale = opt.trunkLearnScale,
    expert_width_scales = table.fromString(opt.expertWidthScales),
    expert_learn_scales = table.fromString(opt.expertLearnScales),
    gater_width_scales = table.fromString(opt.gaterWidthScales),
@@ -106,7 +109,8 @@ local hp = {
    accumulator = opt.accumulator,
    pid = opt.pid,
    hostname = opt.hostname,
-   collection = opt.collection
+   collection = opt.collection,
+   gater_grad_scale = opt.gaterGradScale
 }
 
 local pg = dp.Postgres()

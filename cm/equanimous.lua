@@ -202,6 +202,7 @@ function Equanimous:_evaluateMAP(cstate)
 end
 
 function Equanimous:report()
+   local report = parent.report(self)
    local dist_report = dp.distReport(self._alpha_dist)
    dist_report.bins = self._alpha_bins
    local dr = table.copy(dist_report)
@@ -209,14 +210,16 @@ function Equanimous:report()
    dr.bins = table.tostring(dr.bins)
    dr.name = self:id():toString()
    print(dr.dist)
-   return {
-      alpha = dist_report,
-      n_sample = self._sample_count
-   }
+   return table.merge(
+      report, {alpha = dist_report, n_sample = self._sample_count}
+   )
 end
 
 function Equanimous:zeroStatistics()
-   self._alpha_dist:zero()
+   parent.zeroStatistics(self)
+   if self._alpha_dist then
+      self._alpha_dist:zero()
+   end
    self._sample_count = 0
 end
 

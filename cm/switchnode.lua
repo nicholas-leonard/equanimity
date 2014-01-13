@@ -9,14 +9,18 @@ SwitchNode.isSwitchNode = true
 
 function SwitchNode:__init(config)
    config = config or {}
-   local args, gater, experts, block_gater = xlua.unpack(
+   local args, gater, experts, block_gater, gater_grad_scale 
+      = xlua.unpack(
       {config},
       'SwitchNode', nil,
       {arg='gater', type='dp.Model'},
       {arg='experts', type='table'},
       {arg='block_gater', type='boolean', default=false,
        help='when true, gater does not backpropagate '..
-       'into expert(s) feeding into the gater (from previous layers).'}
+       'into expert(s) feeding into the gater (from previous layers).'},
+      {arg='gater_grad_scale', type='number', default=1,
+       help='scales the gradient before it is added to gradients from'..
+       ' experts which is fedback to previous layer'}
    )
    config.typename = 'switchnode'
    parent.__init(self, config)
@@ -24,6 +28,7 @@ function SwitchNode:__init(config)
    self._experts = experts
    self._block_gater = block_gater
    self._models = _.concat({self._gater}, self._experts)
+   self._gater_grad_scale = gater_grad_scale
 end
 
 function SwitchNode:setup(config)
@@ -38,18 +43,6 @@ function SwitchNode:setup(config)
    config.id = self:id():create('gater')
    self._gater:setup(config)
    self._data_view = self._experts[1]:dataView()
-end
-
-function SwitchNode:report()
-   local report = {
-      typename=self._typename, 
-      num_experts=#self._experts,
-      gater = self._gater:report()
-   }
-   for i, expert in ipairs(self._experts) do 
-      report[i] = expert:report()
-   end
-   return report
 end
 
 function SwitchNode:nExperts()
@@ -78,7 +71,11 @@ function SwitchNode:_forward(cstate)
    local alphas = gater_ostate.alphas:clone()
    -- multiply these alphas by any previous alphas
    if self.istate.alphas then
-      alphas:cmul(self.istate.alphas:resizeAs(alphas))
+      alphas:cmul(
+         self.istate.alphas:reshape(
+            self.istate.alphas:size(1), 1
+         ):expandAs(alphas)
+      )
    end
    local input_act = self.istate.act_double
    self.istate.batch_indices = cstate.batch_indices
@@ -200,9 +197,11 @@ function SwitchNode:_backward(cstates)
    local gater_istate = self._gater:backward{
       global=self.gstate, carry={scale=1/n_example}
    }
+   --print(torch.abs(input_grad):mean(), torch.abs(gater_istate.grad):mean())
    if not self._block_gater then
-      input_grad:add(gater_istate.grad)
+      input_grad:add(self._gater_grad_scale, gater_istate.grad)
    end
+   --print(torch.abs(input_grad):mean())
    self.istate.grad = input_grad
    -- prepare reinforce indices for the next layer
    local concat_reinforce = {}
@@ -232,12 +231,6 @@ function SwitchNode:zeroGradParameters()
   end
 end
 
-function SwitchNode:_update(gstate)
-   for i=1,#self._models do
-      self._models[i]:update(gstate)
-   end
-end
-
 function SwitchNode:reset(stdv)
    for i=1,#self._models do
       self._models[i]:reset(stdv)
@@ -250,13 +243,4 @@ end
 
 function SwitchNode:__tostring__()
    return 'dp.SwitchNode'
-end
-
-function SwitchNode:report()
-   -- merge reports
-   local report = {
-      experts={},
-      gater=self._gater:report()
-   }
-   return report
 end

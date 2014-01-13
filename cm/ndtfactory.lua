@@ -23,7 +23,8 @@ function NDTFactory:buildModel(opt)
       dp.Neural{
          input_size=opt.feature_size, output_size=opt.expert_width,
          transfer=self:buildTransfer(opt.activation),
-         dropout=self:buildDropout(opt.input_dropout and 0.2)
+         dropout=self:buildDropout(opt.input_dropout and 0.2),
+         mvstate={learn_scale=opt.trunk_learn_scale}
       }
    )
    print('trunk has '..opt.expert_width..' hidden neurons')
@@ -101,7 +102,12 @@ function NDTFactory:buildModel(opt)
                mvstate={learn_scale=gater_lrs}
             }
          )
-         table.insert(nodes, dp.SwitchNode{gater=gater, experts=experts})
+         table.insert(nodes, 
+            dp.SwitchNode{
+               gater=gater, experts=experts, 
+               gater_grad_scale=opt.gater_grad_scale
+            }
+         )
       end
       input_size = expert_size
       ndt:add(dp.SwitchLayer{nodes=nodes})

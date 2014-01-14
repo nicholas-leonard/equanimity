@@ -137,14 +137,15 @@ function NDTFactory:buildOptimizer(opt)
          n_reinforce=opt.n_reinforce, n_sample=opt.n_output_sample,
          n_classes=#opt.classes, n_leaf=opt.n_leaf,
          n_eval=opt.n_eval, n_backprop=opt.n_backprop,
-         accumulator=opt.accumulator, backprop_pad = opt.backpropPad
+         accumulator=opt.accumulator, backprop_pad=opt.backprop_pad,
+         yoshua_backprop=opt.yoshua_backprop
       },
       visitor = self:buildVisitor(opt),
       feedback = dp.Confusion(),
       sampler = dp.ShuffleSampler{
          batch_size=opt.batch_size, sample_type=opt.model_type
       },
-      progress = true
+      progress = opt.progress
    }
 end
 

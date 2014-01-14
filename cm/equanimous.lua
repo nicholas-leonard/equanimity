@@ -205,11 +205,11 @@ function Equanimous:report()
    local report = parent.report(self)
    local dist_report = dp.distReport(self._alpha_dist)
    dist_report.bins = self._alpha_bins
-   local dr = table.copy(dist_report)
+   --[[local dr = table.copy(dist_report)
    dr.dist = table.tostring(dr.dist:storage():totable())
    dr.bins = table.tostring(dr.bins)
    dr.name = self:id():toString()
-   print(dr.dist)
+   print(dr.dist)--]]
    return table.merge(
       report, {alpha = dist_report, n_sample = self._sample_count}
    )

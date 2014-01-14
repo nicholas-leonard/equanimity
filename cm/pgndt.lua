@@ -48,9 +48,14 @@ cmd:option('--validRatio', 1/6, 'proportion of train set used for validation')
 cmd:option('--epsilon', 0.1, 'probability of sampling from inverse distribution') 
 cmd:option('--lambda', 0, 'weight of inverse marginal expert multinomial dist')
 cmd:option('--ema', 0.5, 'weight of present for computing exponential moving avg')
-cmd:option('--capitalize', false, 'backpropagate through the best experts per example')
+cmd:option('--backpropPad', 1, 'dont backpropagate through the backpropPad best experts per example (padding)')
 cmd:option('--equanimity', false, 'add a second optimization phase that focuses on experts instead of examples')
 cmd:option('--accumulator', 'softmax', 'softmax | normalize')
+cmd:option('--trunkLearnScale', 1, 'learning rate scale for the trunk layer')
+cmd:option('--gaterGradScale', 1, 'what to multiply gater grad by before adding it to grad sent to previous layer expert or trunk')
+cmd:option('--yoshuaBackprop', false, 'use the distribution of example-expert errors to weigh the output gradients.')
+cmd:option('--progress', false, 'display progress bar')
+cmd:option('--nopg', false, 'dont use postgresql')
 cmd:text()
 opt = cmd:parse(arg or {})
 
@@ -63,7 +68,8 @@ end
 --[[ hyperparameters ]]--
 
 local hp = {
-   version = 2,
+   version = 3,
+   progress = opt.progress,
    max_tries = opt.maxTries,
    max_epoch = opt.maxEpoch,
    model_type = opt.type,
@@ -82,6 +88,7 @@ local hp = {
    expert_width = opt.expertWidth,
    gater_width = opt.gaterWidth,
    gater_dept = table.fromString(opt.gaterDept),
+   trunk_learn_scale = opt.trunkLearnScale,
    expert_width_scales = table.fromString(opt.expertWidthScales),
    expert_learn_scales = table.fromString(opt.expertLearnScales),
    gater_width_scales = table.fromString(opt.gaterWidthScales),
@@ -99,19 +106,40 @@ local hp = {
    epsilon = opt.epsilon,
    lambda = opt.lambda,
    ema = opt.ema,
-   welfare = (not opt.capitalize),
+   backprop_pad = opt.backpropPad,
    share_output = opt.shareOutput,
    valid_ratio = opt.validRatio,
    equanimity = opt.equanimity,
    accumulator = opt.accumulator,
    pid = opt.pid,
    hostname = opt.hostname,
-   collection = opt.collection
+   collection = opt.collection,
+   gater_grad_scale = opt.gaterGradScale,
+   yoshua_backprop = opt.yoshuaBackprop
 }
 
-local pg = dp.Postgres()
-
 local process_id = opt.hostname .. '.' .. opt.pid
+
+if opt.nopg then
+   local logger = dp.FileLogger()
+   hyperopt = dp.HyperOptimizer{
+      collection_name=opt.collection,
+      id_gen=dp.EIDGenerator(process_id),
+      hyperparam_sampler = dp.PriorSampler{
+         name='NDT+Mnist:dist1', dist=hp --only samples random_seed
+      },
+      experiment_factory = dp.NDTFactory{
+         logger=logger,
+         save_strategy=dp.SaveToFile{hostname=opt.hostname}
+      },
+      datasource_factory=dp.MnistFactory(),
+      process_name=process_id,
+      logger=logger
+   }
+   hyperopt:run()
+end
+
+local pg = dp.Postgres()
 local logger = dp.PGLogger{pg=pg}
 
 hyperopt = dp.HyperOptimizer{

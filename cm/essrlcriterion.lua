@@ -12,7 +12,9 @@ local ESSRLCriterion, parent = torch.class("nn.ESSRLCriterion")
 function ESSRLCriterion:__init(config)
    config = config or {}
    local args, n_sample, n_leaf, n_reinforce, n_backprop, n_eval, 
-         n_classes, criterion, accumulator, welfare = xlua.unpack(
+         n_classes, criterion, accumulator, backprop_pad, 
+         yoshua_backprop
+      = xlua.unpack(
       {config},
       'ESSRLCriterion', nil,
       {arg='n_sample', type='number', 
@@ -30,8 +32,13 @@ function ESSRLCriterion:__init(config)
       {arg='criterion', type='nn.Criterion', default=nn.ClassNLLCriterion,
        help='Criterion to be used for optimizing winning experts'},
       {arg='accumulator', type='string', default='softmax'},
-      {arg='welfare', type='boolean', default=true,
-       help='backpropagate through the worst experts per example'}
+      {arg='backprop_pad', type='number', default=0,
+       help='number of experts with least error to ignore before '..
+       'backpropagating through n_backprop experts. Used to keep '..
+       'lesser experts in the game.'},
+      {arg='yoshua_backprop', type='boolean', default=false,
+       help='use the distribution of example-expert errors to weigh '..
+       'the backpropagated gradients.'}
    )
    -- we expect the criterion to be stateless (we use it as a function)
    self._criterion = criterion()
@@ -44,7 +51,8 @@ function ESSRLCriterion:__init(config)
    self._n_eval = n_eval
    self._n_classes = n_classes
    self._accumulator = accumulator
-   self._welfare = welfare
+   self._backprop_pad = backprop_pad
+   self._yoshua_backprop = yoshua_backprop
    -- statistics :
    --- monopoly : 
    ---- distribution of examples to experts
@@ -76,6 +84,7 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
    local input_alphas = torch.DoubleTensor(unpack(size))
    -- original indices of example in expert mini-batch
    local input_origins = torch.LongTensor(unpack(size))
+   local output_errors = torch.DoubleTensor(unpack(size))
    local batch = {}
    for expert_idx, expert_ostate in pairs(expert_ostates) do
       if type(expert_idx) == 'number' then
@@ -103,10 +112,10 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       end
    end
    for batch_idx, example in pairs(batch) do
-      -- sort each example's experts by descending err (welfare == true)
+      -- sort each example's experts by descending err
       local example_errors, idxs = torch.DoubleTensor(
          example.errors
-      ):sort(1, self._welfare)
+      ):sort(1, false)
       assert(example_errors:size(1) == self._n_sample)
       local example_acts = torch.DoubleTensor(
          #example.acts, self._n_classes
@@ -116,18 +125,19 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       end
       local example_targets 
          = torch.LongTensor(example.targets):index(1, idxs)
-      local target = example_targets[1]
+      local target = example_targets[1+self._backprop_pad]
       local example_experts 
          = torch.LongTensor(example.experts):index(1, idxs)
-      local expert_idx = example_experts[1]
+      local expert_idx = example_experts[1+self._backprop_pad]
       -- gater stats
       self._spec_matrix[{expert_idx, target}] 
             = self._spec_matrix[{expert_idx, target}] + 1 
-      local err = example_errors[1]
+      local err = example_errors[1+self._backprop_pad]
       self._err_matrix[{expert_idx, target}] 
             = self._err_matrix[{expert_idx, target}] + err
       local example_alphas = torch.DoubleTensor(example.alphas)
       local example_origins = torch.LongTensor(example.origins)
+      output_errors[{batch_idx, {}}] = example_errors
       input_acts[{batch_idx, {}, {}}] = example_acts:index(1, idxs)
       input_experts[{batch_idx,{}}] = example_experts
       input_alphas[{batch_idx,{}}] = example_alphas:index(1, idxs)
@@ -139,9 +149,6 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
    -- reinforce the winners.
    -- keep n_reinforce winners
    local sub = {1,self._n_eval}
-   if self._welfare then
-      sub = {self._n_sample-self._n_eval+1, self._n_sample}
-   end
    local win_input_acts = input_acts[{{},sub,{}}]
    local win_input_alphas = input_alphas[{{},sub}]
    local alphas
@@ -172,9 +179,11 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
    -- measure error
    local output_error = self._criterion:forward(outputs, targets)
    -- store for backward pass
+   self._input_alphas = input_alphas
    self._input_acts = input_acts
    self._input_experts = input_experts
    self._input_origins = input_origins
+   self._output_errors = output_errors
    self._batch = batch
    return output_error, outputs
 end
@@ -182,6 +191,41 @@ end
 function ESSRLCriterion:backward(expert_ostates, targets, indices)
    --regroup by experts
    local experts = {}
+   local grad_weights
+   if self._yoshua_backprop then
+      -- normalize sum to one
+      self._output_errors:cdiv(
+         self._output_errors:sum(2):reshape(
+            indices:size(1), 1
+         ):expandAs(self._output_errors)
+      )
+      -- zero smallest error
+      self._output_errors:add(
+         -self._output_errors:min(2):reshape(
+            indices:size(1), 1
+         ):expandAs(self._output_errors)
+      )
+      -- normalize sum to one
+      self._output_errors:cdiv(
+         self._output_errors:sum(2):reshape(
+            indices:size(1), 1
+         ):expandAs(self._output_errors)
+      )
+      self._input_alphas:cdiv(
+         self._input_alphas:sum(2):reshape(
+            indices:size(1), 1
+         ):expandAs(self._input_alphas)
+      )
+      -- multiply reverse p_error and p_alpha to get grad weights
+      grad_weights = torch.cmul(
+         self._input_alphas, dp.reverseDist(self._output_errors)
+      )
+      grad_weights:cdiv(
+         grad_weights:sum(2):reshape(indices:size(1), 1):expandAs(
+            grad_weights
+         )
+      ) --:mul(grad_weights:size(2)) --scaled to match previous learning rates
+   end
    for batch_idx = 1,self._input_experts:size(1) do
       local example = self._batch[batch_idx]
       local n_sample = self._input_experts:size(2)
@@ -194,25 +238,24 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
          table.insert(expert.origins, origin_idx)
          -- focus backprop on first experts (see forward() for order)
          -- some expert-example pairs have no grad (dont learn)
-         if sample_idx <= self._n_backprop then
+         if sample_idx > self._backprop_pad 
+               and sample_idx <= self._n_backprop then
             local act = self._input_acts:select(1,batch_idx):select(
                1, sample_idx
             )
             -- backprop through criterion
-            expert.grads[origin_idx] = self._criterion:backward(
+            local grad = self._criterion:backward(
                act, targets[batch_idx]
             ):clone()
+            if self._yoshua_backprop then
+              grad:mul(grad_weights[{batch_idx,sample_idx}])
+            end
+            expert.grads[origin_idx] = grad
             table.insert(expert.backprop, origin_idx)
          end
          -- reinforce stronger experts in gater
-         if self._welfare then
-            if sample_idx >= n_sample - self._n_reinforce + 1 then
-               table.insert(expert.reinforce, origin_idx)
-            end
-         else
-            if sample_idx <= self._n_reinforce then
-               table.insert(expert.reinforce, origin_idx)
-            end
+         if sample_idx <= self._n_reinforce then
+            table.insert(expert.reinforce, origin_idx)
          end
          experts[expert_idx] = expert
       end
@@ -406,7 +449,7 @@ function ESSRLCriterion:report()
       spec = self._spec_matrix,
       expert_error = self._err_matrix:sum(2):cdiv(self._spec_matrix:sum(2))
    }
-   local r = table.merge({}, report)
+   --[[local r = table.merge({}, report)
    r.reinforce.dist = table.tostring(r.reinforce.dist:storage():totable())
    r.sample.dist = table.tostring(r.sample.dist:storage():totable())
    print(r)
@@ -415,6 +458,6 @@ function ESSRLCriterion:report()
    print('error matrix')
    self._spec_matrix:add(0.000001)
    print(self._err_matrix:sum(2):cdiv(self._spec_matrix:sum(2)))
-   print(self._err_matrix:sum(1):cdiv(self._spec_matrix:sum(1)))
+   print(self._err_matrix:sum(1):cdiv(self._spec_matrix:sum(1)))--]]
    return report
 end

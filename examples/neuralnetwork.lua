@@ -21,6 +21,8 @@ cmd:option('--type', 'double', 'type: double | float | cuda')
 cmd:option('--maxEpoch', 100, 'maximum number of epochs to run')
 cmd:option('--maxTries', 30, 'maximum number of epochs to try to find a better local minima for early-stopping')
 cmd:option('--dropout', false, 'apply dropout on hidden neurons, requires "nnx" luarock')
+cmd:option('--dataset', 'Mnist', 'which dataset to use')
+cmd:option('--lecunLCN', false, 'apply LeCunLCN preprocessing')
 cmd:text()
 opt = cmd:parse(arg or {})
 
@@ -29,10 +31,14 @@ print(opt)
 --[[Experiment ID generator]]--
 id_gen = dp.EIDGenerator('mypc.pid')
 
+--[[preprocessing]]--
+local input_preprocess
+if opt.lecunLCN then
+   input_preprocess=dp.LeCunLCN()
+end
+
 --[[Load DataSource]]--
---datasource = dp.Mnist{input_preprocess=dp.LeCunLCN{}}
---datasource = dp.Cifar10{}
-datasource = dp.Cifar10{input_preprocess=dp.LeCunLCN{}}
+local datasource =dp[opt.dataset]{input_preprocess=input_preprocess}
 
 
 --[[Model]]--

@@ -71,7 +71,7 @@ train = dp.Optimizer{
       dp.Learn{
          learning_rate=opt.learningRate, 
          observer = dp.LearningRateSchedule{
-            schedule={[100]=0.01, [200]=0.001}
+            schedule={[200]=0.01, [400]=0.001}
          }
       },
       dp.MaxNorm{max_out_norm=opt.maxOutNorm}

@@ -4,7 +4,7 @@ require 'cm'
 
 cmd = torch.CmdLine()
 cmd:text()
-cmd:text('PostgreSQL-backed MNIST Neural Decision Tree Training/Optimization')
+cmd:text('PostgreSQL-backed Neural Decision Tree Training/Optimization')
 cmd:text('Example:')
 cmd:text('$> th pgndt.lua --collection "MNIST-NDT-2" --hostname "nps" --pid 1 --type cuda --maxTries 100 --maxEpoch 1000 --batchSize 128 --nBranch 8 --learningRate 0.01 --momentum 0.9995 --activation ReLU --gaterWidth 320 --gaterWidthScales "{1,2,2}" --gaterDept "{2,2,2}" --expertWidth 2048 --expertWidthScales "{2,2,2}" --nSwitchLayer 1 --nReinforce 1 --nSample 2 --nEval 1')
 cmd:text('Options:')
@@ -39,7 +39,7 @@ cmd:option('--shareOutput', false, 'share parameters of output layer')
 cmd:option('--useDevice', 1, 'sets the device (GPU) to use for this hyperoptimization')
 cmd:option('--blockGater', false, 'when true, gater does not backpropagate into previous expert(s)')
 cmd:option('--firstDecay', 200, 'epoch at which learning rate is first decayed by a factor of 0.1')
-cmd:option('--secondDecay', 400, 'epoch at which learning rate is then decayed by another factor of 0.1')
+cmd:option('--secondDecay', 200, 'number of epochs after first decay when learning rate is to decayed by another factor of 0.1')
 cmd:option('--collection', 'postgresql-backend hyperoptimization example 2', 'identifies a collection of related experiments')
 cmd:option('--hostname', 'localhost', 'hostname for this host')
 cmd:option('--pid', 0, 'identifies process on host. Only important that each process on same host have different names')
@@ -48,7 +48,7 @@ cmd:option('--validRatio', 1/6, 'proportion of train set used for validation')
 cmd:option('--epsilon', 0.1, 'probability of sampling from inverse distribution') 
 cmd:option('--lambda', 0, 'weight of inverse marginal expert multinomial dist')
 cmd:option('--ema', 0.5, 'weight of present for computing exponential moving avg')
-cmd:option('--backpropPad', 1, 'dont backpropagate through the backpropPad best experts per example (padding)')
+cmd:option('--backpropPad', 0, 'dont backpropagate through the backpropPad best experts per example (padding)')
 cmd:option('--equanimity', false, 'add a second optimization phase that focuses on experts instead of examples')
 cmd:option('--accumulator', 'softmax', 'softmax | normalize')
 cmd:option('--trunkLearnScale', 1, 'learning rate scale for the trunk layer')
@@ -56,6 +56,7 @@ cmd:option('--gaterGradScale', 1, 'what to multiply gater grad by before adding 
 cmd:option('--yoshuaBackprop', false, 'use the distribution of example-expert errors to weigh the output gradients.')
 cmd:option('--progress', false, 'display progress bar')
 cmd:option('--nopg', false, 'dont use postgresql')
+cmd:option('--datasource', 'Mnist', 'datasource to use : Mnist | NotMnist ')
 cmd:text()
 opt = cmd:parse(arg or {})
 
@@ -73,7 +74,7 @@ local hp = {
    max_tries = opt.maxTries,
    max_epoch = opt.maxEpoch,
    model_type = opt.type,
-   datasource = 'mnist',
+   datasource = string.lower(opt.datasource),
    random_seed = dp.TimeChoose(),
    model_dept = opt.nSwitchLayer + 2, -- 2 for trunk and leafs
    batch_size = opt.batchSize,
@@ -125,14 +126,14 @@ if opt.nopg then
    hyperopt = dp.HyperOptimizer{
       collection_name=opt.collection,
       id_gen=dp.EIDGenerator(process_id),
-      hyperparam_sampler = dp.PriorSampler{
-         name='NDT+Mnist:dist1', dist=hp --only samples random_seed
+      hyperparam_sampler = dp.PriorSampler{--only samples random_seed
+         name='NDT+'..opt.datasource..':user_dist', dist=hp 
       },
       experiment_factory = dp.NDTFactory{
          logger=logger,
          save_strategy=dp.SaveToFile{hostname=opt.hostname}
       },
-      datasource_factory=dp.MnistFactory(),
+      datasource_factory=dp[opt.datasource..'Factory'](),
       process_name=process_id,
       logger=logger
    }
@@ -145,14 +146,14 @@ local logger = dp.PGLogger{pg=pg}
 hyperopt = dp.HyperOptimizer{
    collection_name=opt.collection,
    id_gen=dp.PGEIDGenerator{pg=pg},
-   hyperparam_sampler = dp.PriorSampler{
-      name='NDT+Mnist:dist1', dist=hp --only samples random_seed
+   hyperparam_sampler = dp.PriorSampler{--only samples random_seed
+      name='NDT+'..opt.datasource..':user_dist', dist=hp 
    },
    experiment_factory = dp.PGNDTFactory{
       logger=logger, pg=pg, 
       save_strategy=dp.PGSaveToFile{hostname=opt.hostname, pg=pg}
    },
-   datasource_factory=dp.MnistFactory(),
+   datasource_factory=dp[opt.datasource..'Factory'](),
    process_name=process_id,
    logger=logger
 }

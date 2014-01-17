@@ -22,9 +22,12 @@ if opt.hp then
    local hp = entry:hyperReport().hyperparam
    print(hp)
 end
-local epochs, minimas, epoch, minima = entry:minima() 
-local report = entry:report(epoch)
-if opt.epoch > -1 then
+
+local report
+if opt.epoch < 0 then
+   local epochs, minimas, epoch, minima = entry:minima() 
+   report = entry:report(epoch)
+else
    report = entry:report(opt.epoch)
 end
 local channel = {'optimizer','essrl','spec'}

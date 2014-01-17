@@ -25,7 +25,9 @@ cmd:option('--useDevice', 1, 'sets the device (GPU) to use')
 cmd:option('--maxEpoch', 2000, 'maximum number of epochs to run')
 cmd:option('--maxTries', 200, 'maximum number of epochs to try to find a better local minima for early-stopping')
 cmd:option('--dropoutProbs', '{0}', 'probability of dropout on inputs to each layer, requires "nnx" luarock')
-cmd:option('--datasource', 'Mnist', 'datasource to use : Mnist | NotMnist ')
+cmd:option('--datasource', 'Mnist', 'datasource to use : Mnist | NotMnist | Cifar10')
+cmd:option('--zca_gcn', false, 'apply ZCA followed by GCN input preprocessing')
+cmd:option('--standardize', false, 'apply Standardize input preprocessing')
 cmd:option('--lecunLCN', false, 'apply LeCunLCN preprocessing to datasource inputs')
 cmd:option('--collection', 'hyperoptimization example 1', 'identifies a collection of related experiments')
 cmd:option('--hostname', 'localhost', 'hostname for this host')
@@ -48,7 +50,7 @@ local hp = {
    max_tries = opt.maxTries,
    max_epoch = opt.maxEpoch,
    model_type = opt.type,
-   datasource = string.lower(opt.datasource),
+   datasource = opt.datasource,
    random_seed = dp.TimeChoose(),
    batch_size = opt.batchSize,
    random_seed = dp.TimeChoose(),
@@ -68,7 +70,10 @@ local hp = {
    pid = opt.pid,
    hostname = opt.hostname,
    collection = opt.collection,
-   progress = opt.progress
+   progress = opt.progress,
+   zca_gcn = opt.zca_gcn,
+   standardize = opt.standardize,
+   lecunlcn = opt.lecunLCN
 }
 
 local process_id = opt.hostname .. '.' .. opt.pid
@@ -85,7 +90,7 @@ if opt.nopg then
          logger=logger,
          save_strategy=dp.SaveToFile{hostname=opt.hostname}
       },
-      datasource_factory=dp[opt.datasource..'Factory'](),
+      datasource_factory=dp.ImageClassFactory(),
       process_name=process_id,
       logger=logger
    }
@@ -105,7 +110,7 @@ hyperopt = dp.HyperOptimizer{
       logger=logger, pg=pg, 
       save_strategy=dp.PGSaveToFile{hostname=opt.hostname, pg=pg}
    },
-   datasource_factory=dp[opt.datasource..'Factory'](),
+   datasource_factory=dp.ImageClassFactory(),
    process_name=process_id,
    logger=logger
 }

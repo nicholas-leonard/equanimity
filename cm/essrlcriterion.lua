@@ -13,7 +13,7 @@ function ESSRLCriterion:__init(config)
    config = config or {}
    local args, n_sample, n_leaf, n_reinforce, n_backprop, n_eval, 
          n_classes, criterion, accumulator, backprop_pad, 
-         yoshua_backprop
+         yoshua_backprop, precise_gater
       = xlua.unpack(
       {config},
       'ESSRLCriterion', nil,
@@ -38,7 +38,9 @@ function ESSRLCriterion:__init(config)
        'lesser experts in the game.'},
       {arg='yoshua_backprop', type='boolean', default=false,
        help='use the distribution of example-expert errors to weigh '..
-       'the backpropagated gradients.'}
+       'the backpropagated gradients.'},
+      {arg='precise_gater', type='boolean', default=false,
+       help='use the Precise gater instead of Equanimity'}
    )
    -- we expect the criterion to be stateless (we use it as a function)
    self._criterion = criterion()
@@ -53,6 +55,7 @@ function ESSRLCriterion:__init(config)
    self._accumulator = accumulator
    self._backprop_pad = backprop_pad
    self._yoshua_backprop = yoshua_backprop
+   self._precise_gater = precise_gater
    -- statistics :
    --- monopoly : 
    ---- distribution of examples to experts
@@ -192,39 +195,50 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
    --regroup by experts
    local experts = {}
    local grad_weights
-   if self._yoshua_backprop then
+   if self._yoshua_backprop or self._precise_gater then
       -- normalize sum to one
       self._output_errors:cdiv(
          self._output_errors:sum(2):reshape(
             indices:size(1), 1
          ):expandAs(self._output_errors)
       )
-      -- zero smallest error
+      --[[ zero smallest error
       self._output_errors:add(
          -self._output_errors:min(2):reshape(
             indices:size(1), 1
          ):expandAs(self._output_errors)
-      )
+      )--]]
       -- normalize sum to one
       self._output_errors:cdiv(
          self._output_errors:sum(2):reshape(
             indices:size(1), 1
          ):expandAs(self._output_errors)
       )
-      self._input_alphas:cdiv(
-         self._input_alphas:sum(2):reshape(
-            indices:size(1), 1
-         ):expandAs(self._input_alphas)
-      )
-      -- multiply reverse p_error and p_alpha to get grad weights
-      grad_weights = torch.cmul(
-         self._input_alphas, dp.reverseDist(self._output_errors)
-      )
-      grad_weights:cdiv(
-         grad_weights:sum(2):reshape(indices:size(1), 1):expandAs(
-            grad_weights
+      -- reverse dist
+      self._reverse_error = dp.reverseDist(self._output_errors)
+      if _.isNaN(self._reverse_error:sum()) then
+         print("RE NaN", _.isNaN(self._output_errors:sum()))
+      end
+      if self._yoshua_backprop then
+         self._input_alphas:cdiv(
+            self._input_alphas:sum(2):reshape(
+               indices:size(1), 1
+            ):expandAs(self._input_alphas)
          )
-      ) --:mul(grad_weights:size(2)) --scaled to match previous learning rates
+         -- multiply reverse p_error and p_alpha to get grad weights
+         grad_weights = torch.cmul(
+            dp.reverseDist(self._input_alphas), --more grad for least likely
+            self._reverse_error --more grad for least error
+         )
+         grad_weights:cdiv(
+            grad_weights:sum(2):reshape(indices:size(1), 1):expandAs(
+               grad_weights
+            )
+         ) --:mul(grad_weights:size(2)) --scaled to match previous learning rates
+         if _.isNaN(grad_weights:sum()) then
+            print("grad_weights NaN")
+         end
+      end
    end
    for batch_idx = 1,self._input_experts:size(1) do
       local example = self._batch[batch_idx]
@@ -233,7 +247,7 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
          local expert_idx = self._input_experts[{batch_idx,sample_idx}]
          local origin_idx = self._input_origins[{batch_idx,sample_idx}]
          local expert = experts[expert_idx] or {
-            reinforce={}, grads={}, origins={}, backprop={}
+            reinforce={}, grads={}, origins={}, backprop={}, reverse_error={}
          }
          table.insert(expert.origins, origin_idx)
          -- focus backprop on first experts (see forward() for order)
@@ -254,8 +268,11 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
             table.insert(expert.backprop, origin_idx)
          end
          -- reinforce stronger experts in gater
-         if sample_idx <= self._n_reinforce then
+         if self._precise_gater or sample_idx <= self._n_reinforce then
             table.insert(expert.reinforce, origin_idx)
+         end
+         if self._precise_gater then
+            table.insert(expert.reverse_error, self._reverse_error[{batch_idx, sample_idx}])
          end
          experts[expert_idx] = expert
       end
@@ -276,7 +293,8 @@ function ESSRLCriterion:backward(expert_ostates, targets, indices)
       cstates[expert_idx] = {
          batch_indices = expert_ostate.batch_indices,
          reinforce_indices = expert.reinforce,
-         backprop_indices = expert.backprop
+         backprop_indices = expert.backprop,
+         gater_targets = expert.reverse_error
       }
       expert_ostate.grad = grad:type(expert_ostate.act:type())
    end
@@ -447,7 +465,7 @@ function ESSRLCriterion:report()
       reinforce = dp.distReport(self._reinforce_dist),
       sample = dp.distReport(self._sample_dist),
       spec = self._spec_matrix,
-      expert_error = self._err_matrix:sum(2):cdiv(self._spec_matrix:sum(2))
+      expert_error = self._err_matrix:sum(2):cdiv(self._spec_matrix:sum(2):add(0.00001))
    }
    --[[local r = table.merge({}, report)
    r.reinforce.dist = table.tostring(r.reinforce.dist:storage():totable())

@@ -9,7 +9,7 @@ SwitchNode.isSwitchNode = true
 
 function SwitchNode:__init(config)
    config = config or {}
-   local args, gater, experts, block_gater, gater_grad_scale 
+   local args, gater, experts, block_gater, gater_grad_scale, precise_gater
       = xlua.unpack(
       {config},
       'SwitchNode', nil,
@@ -20,7 +20,8 @@ function SwitchNode:__init(config)
        'into expert(s) feeding into the gater (from previous layers).'},
       {arg='gater_grad_scale', type='number', default=1,
        help='scales the gradient before it is added to gradients from'..
-       ' experts which is fedback to previous layer'}
+       ' experts which is fedback to previous layer'},
+      {arg='precise_gater', type='boolean', default=false}
    )
    config.typename = 'switchnode'
    parent.__init(self, config)
@@ -29,6 +30,7 @@ function SwitchNode:__init(config)
    self._block_gater = block_gater
    self._models = _.concat({self._gater}, self._experts)
    self._gater_grad_scale = gater_grad_scale
+   self._precise_gater = precise_gater
 end
 
 function SwitchNode:setup(config)
@@ -149,6 +151,12 @@ function SwitchNode:_backward(cstates)
    local istate = {}
    local g_reinforce = {} -- indices for this layer's gater
    local i_reinforce = {} -- indices for previous layer
+   local gater_targets = {}
+   if self._precise_gater then
+      gater_targets = torch.DoubleTensor(
+         self._gater.ostate.act:size()
+      ):zero()
+   end
    local backprop = {} -- indices for the previous layer
    self.istate.act_double = self.istate.act_double 
       or self.istate.act:double()
@@ -171,6 +179,13 @@ function SwitchNode:_backward(cstates)
          )
          g_reinforce[expert_idx] = reinforce_indices
          i_reinforce[expert_idx] = reinforce_indices:storage():totable()
+         -- gater targets
+         if self._precise_gater and not _.isEmpty(expert_cstate.gater_targets) then
+            gater_targets[{{},expert_idx}]:indexCopy(
+               1, expert_indices, 
+               torch.DoubleTensor(expert_cstate.gater_targets)
+            )
+         end
       end
       -- indices of the input to the switch_node to backprop
       if not _.isEmpty(expert_cstate.backprop_indices) then
@@ -192,8 +207,10 @@ function SwitchNode:_backward(cstates)
       input_grad:add(expert_grad:type(input_grad:type()))
    end 
    --[[ gater ]]--
+   
    -- backward gater to get routes
    self._gater.ostate.reinforce_indices = g_reinforce
+   self._gater.ostate.gater_targets = gater_targets
    local gater_istate = self._gater:backward{
       global=self.gstate, carry={scale=1/n_example}
    }
@@ -203,13 +220,16 @@ function SwitchNode:_backward(cstates)
    end
    --print(torch.abs(input_grad):mean())
    self.istate.grad = input_grad
+   if self._precise_gater then
+      gater_targets = gater_targets:sum(2):storage():totable()
+   end
    -- prepare reinforce indices for the next layer
    local concat_reinforce = {}
    for expert_idx, expert_reinforce in pairs(i_reinforce) do
       for __, batch_idx in ipairs(expert_reinforce) do
          table.insert(concat_reinforce, batch_idx)
       end
-   end
+   end 
    -- prepare backprop indices for the next layer
    local concat_backprop = {}
    for expert_idx, expert_backprop in pairs(backprop) do
@@ -220,7 +240,8 @@ function SwitchNode:_backward(cstates)
    local cstate = {
       batch_indices = self.istate.batch_indices,
       reinforce_indices = _.uniq(concat_reinforce),
-      backprop_indices = _.uniq(concat_backprop)
+      backprop_indices = _.uniq(concat_backprop),
+      gater_targets = gater_targets
    }
    return cstate
 end

@@ -56,7 +56,12 @@ cmd:option('--gaterGradScale', 1, 'what to multiply gater grad by before adding 
 cmd:option('--yoshuaBackprop', false, 'use the distribution of example-expert errors to weigh the output gradients.')
 cmd:option('--progress', false, 'display progress bar')
 cmd:option('--nopg', false, 'dont use postgresql')
-cmd:option('--datasource', 'Mnist', 'datasource to use : Mnist | NotMnist ')
+cmd:option('--datasource', 'Mnist', 'datasource to use : Mnist | NotMnist | Cifar10')
+cmd:option('--zca_gcn', false, 'apply GCN followed by ZCA input preprocessing')
+cmd:option('--standardize', false, 'apply Standardize input preprocessing')
+cmd:option('--lecunLCN', false, 'apply LeCunLCN preprocessing to datasource inputs')
+cmd:option('--minAccuracy', 0.1, 'minimum accuracy that must be maintained after 10 epochs')
+cmd:option('--preciseGater', false, 'use Precise instead of equanimous')
 cmd:text()
 opt = cmd:parse(arg or {})
 
@@ -69,12 +74,12 @@ end
 --[[ hyperparameters ]]--
 
 local hp = {
-   version = 3,
+   version = 4,
    progress = opt.progress,
    max_tries = opt.maxTries,
    max_epoch = opt.maxEpoch,
    model_type = opt.type,
-   datasource = string.lower(opt.datasource),
+   datasource = opt.datasource,
    random_seed = dp.TimeChoose(),
    model_dept = opt.nSwitchLayer + 2, -- 2 for trunk and leafs
    batch_size = opt.batchSize,
@@ -116,7 +121,12 @@ local hp = {
    hostname = opt.hostname,
    collection = opt.collection,
    gater_grad_scale = opt.gaterGradScale,
-   yoshua_backprop = opt.yoshuaBackprop
+   precise_gater = opt.preciseGater,
+   yoshua_backprop = opt.yoshuaBackprop,
+   zca_gcn = opt.zca_gcn,
+   standardize = opt.standardize,
+   lecunlcn = opt.lecunLCN,
+   max_error = opt.minAccuracy
 }
 
 local process_id = opt.hostname .. '.' .. opt.pid
@@ -133,7 +143,7 @@ if opt.nopg then
          logger=logger,
          save_strategy=dp.SaveToFile{hostname=opt.hostname}
       },
-      datasource_factory=dp[opt.datasource..'Factory'](),
+      datasource_factory=dp.ImageClassFactory(),
       process_name=process_id,
       logger=logger
    }
@@ -153,9 +163,11 @@ hyperopt = dp.HyperOptimizer{
       logger=logger, pg=pg, 
       save_strategy=dp.PGSaveToFile{hostname=opt.hostname, pg=pg}
    },
-   datasource_factory=dp[opt.datasource..'Factory'](),
+   datasource_factory=dp.ImageClassFactory(),
    process_name=process_id,
    logger=logger
 }
 
 hyperopt:run()
+
+

@@ -92,20 +92,34 @@ function NDTFactory:buildModel(opt)
          elseif opt.gater_dept[layer_idx] ~= 1 then
             error"Unsupported gater dept"
          end
-         gater:add(
-            dp.Equanimous{
-               input_size=g_input_size, output_size=opt.n_branch,
-               dropout=self:buildDropout(opt.gater_dropout and 0.5),
-               transfer=nn.Sigmoid(), n_sample=opt.n_sample,
-               n_reinforce=opt.n_reinforce, n_eval=opt.n_eval,
-               epsilon=opt.epsilon, lambda=opt.lambda, ema=opt.ema,
-               mvstate={learn_scale=gater_lrs}
-            }
-         )
+         if opt.precise_gater then
+            gater:add(
+               dp.Precise{
+                  input_size=g_input_size, output_size=opt.n_branch,
+                  dropout=self:buildDropout(opt.gater_dropout and 0.5),
+                  transfer=nn.LogSoftMax(), n_sample=opt.n_sample,
+                  n_reinforce=opt.n_reinforce, n_eval=opt.n_eval,
+                  epsilon=opt.epsilon, lambda=opt.lambda, ema=opt.ema,
+                  mvstate={learn_scale=gater_lrs}
+               }
+            )
+         else
+            gater:add(
+               dp.Equanimous{
+                  input_size=g_input_size, output_size=opt.n_branch,
+                  dropout=self:buildDropout(opt.gater_dropout and 0.5),
+                  transfer=nn.Sigmoid(), n_sample=opt.n_sample,
+                  n_reinforce=opt.n_reinforce, n_eval=opt.n_eval,
+                  epsilon=opt.epsilon, lambda=opt.lambda, ema=opt.ema,
+                  mvstate={learn_scale=gater_lrs}
+               }
+            )
+         end
          table.insert(nodes, 
             dp.SwitchNode{
                gater=gater, experts=experts, 
-               gater_grad_scale=opt.gater_grad_scale
+               gater_grad_scale=opt.gater_grad_scale,
+               precise_gater = opt.precise_gater
             }
          )
       end
@@ -138,7 +152,8 @@ function NDTFactory:buildOptimizer(opt)
          n_classes=#opt.classes, n_leaf=opt.n_leaf,
          n_eval=opt.n_eval, n_backprop=opt.n_backprop,
          accumulator=opt.accumulator, backprop_pad=opt.backprop_pad,
-         yoshua_backprop=opt.yoshua_backprop
+         yoshua_backprop=opt.yoshua_backprop, 
+         precise_gater=opt.precise_gater
       },
       visitor = self:buildVisitor(opt),
       feedback = dp.Confusion(),
@@ -208,7 +223,7 @@ function PGNDTFactory:buildObserver(opt)
          maximize = true,
          max_epochs = opt.max_tries,
          save_strategy = self._save_strategy,
-         min_epoch = 10, max_error = 0.5
+         min_epoch = 10, max_error = opt.max_error
       },
       dp.PGDone{pg=self._pg}
    }

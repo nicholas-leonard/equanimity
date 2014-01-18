@@ -13,7 +13,7 @@ Equanimous.isEquanimous = true
 function Equanimous:__init(config)
    config = config or {}
    local args, n_sample, n_reinforce, targets, transfer, 
-         epsilon, eval_proto, lambda, ema
+         epsilon, eval_proto, lambda, ema, criterion
       = xlua.unpack(
       {config},
       'Equanimous', nil,
@@ -34,7 +34,8 @@ function Equanimous:__init(config)
       {arg='lambda', type='number', default=0, 
        help='weight of inverse marginal expert multinomial dist'},
       {arg='ema', type='number', default=0.5,
-       help='weight of present for computing exponential moving avg'}
+       help='weight of present for computing exponential moving avg'},
+      {arg='criterion', type='nn.Criterion', default=nn.MSECriterion()}
    )
    config.typename = config.typename or 'equanimous'
    config.transfer = transfer
@@ -44,7 +45,7 @@ function Equanimous:__init(config)
    self._targets = targets
    self._epsilon = epsilon
    self._eval_proto = eval_proto
-   self._criterion = nn.MSECriterion()
+   self._criterion = criterion
    self._criterion.sizeAverage = false
    self._lambda = lambda
    self._ema = ema
@@ -72,7 +73,6 @@ function Equanimous:_forward(cstate)
 end
 
 function Equanimous:_exampleFocus(cstate)
-   local start = os.clock()
    -- affine transform + transfer function
    parent._forward(self, cstate)
    self.ostate.act_double = self.ostate.act:double()
@@ -129,7 +129,6 @@ function Equanimous:_exampleFocus(cstate)
          + current_mean:div(current_mean:sum()):mul(self._ema)
    end
    self._sample_count = self._sample_count + alphas:size(1)
-   --print("example", os.clock()-start)
 end
 
 function Equanimous:_expertFocus(cstate)

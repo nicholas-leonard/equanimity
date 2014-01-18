@@ -26,7 +26,7 @@ cmd:option('--maxEpoch', 2000, 'maximum number of epochs to run')
 cmd:option('--maxTries', 200, 'maximum number of epochs to try to find a better local minima for early-stopping')
 cmd:option('--dropoutProbs', '{0}', 'probability of dropout on inputs to each layer, requires "nnx" luarock')
 cmd:option('--datasource', 'Mnist', 'datasource to use : Mnist | NotMnist | Cifar10')
-cmd:option('--zca_gcn', false, 'apply ZCA followed by GCN input preprocessing')
+cmd:option('--zca_gcn', false, 'apply GCN followed by ZCA input preprocessing')
 cmd:option('--standardize', false, 'apply Standardize input preprocessing')
 cmd:option('--lecunLCN', false, 'apply LeCunLCN preprocessing to datasource inputs')
 cmd:option('--collection', 'hyperoptimization example 1', 'identifies a collection of related experiments')
@@ -35,6 +35,7 @@ cmd:option('--pid', 0, 'identifies process on host.')
 cmd:option('--validRatio', 1/6, 'proportion of train set used for cross-validation')
 cmd:option('--progress', false, 'display progress bar')
 cmd:option('--nopg', false, 'dont use postgresql')
+cmd:option('--minAccuracy', 0.1, 'minimum accuracy that must be maintained after 10 epochs')
 cmd:text()
 opt = cmd:parse(arg or {})
 
@@ -73,7 +74,8 @@ local hp = {
    progress = opt.progress,
    zca_gcn = opt.zca_gcn,
    standardize = opt.standardize,
-   lecunlcn = opt.lecunLCN
+   lecunlcn = opt.lecunLCN,
+   max_error = opt.minAccuracy
 }
 
 local process_id = opt.hostname .. '.' .. opt.pid

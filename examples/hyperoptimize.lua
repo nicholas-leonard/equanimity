@@ -4,7 +4,7 @@ require 'dp'
 
 cmd = torch.CmdLine()
 cmd:text()
-cmd:text('MNIST+MLP Hyperparameter Optimization')
+cmd:text('CIFAR10+MLP Hyperparameter Optimization')
 cmd:text('Example:')
 cmd:text('$> th hyperoptimize.lua --maxEpoch 500 --maxTries 50 --collection "MnistMLP1" --hostname "myhost.mydomain.com" --pid 1')
 cmd:text('Options:')
@@ -29,7 +29,8 @@ dist = {
    max_tries = opt.maxTries,
    max_epoch = opt.maxEpoch,
    model_type = opt.type,
-   datasource = 'mnist',
+--   datasource = 'mnist',
+   datasource = 'cifar10',
    random_seed = dp.TimeChoose(),
    batch_size = dp.WeightedChoose{
       [32]=10, [64]=7, [128]=5, [256]=4, [16]=3, [8]=2, [512]=1 
@@ -81,9 +82,9 @@ local logger = dp.FileLogger()
 hyperopt = dp.HyperOptimizer{
    collection_name = opt.collection,
    id_gen = dp.EIDGenerator(process_id),
-   hyperparam_sampler = dp.PriorSampler{name='MLP+Mnist:dist2', dist=dist},
+   hyperparam_sampler = dp.PriorSampler{name='CIFAR10+Mnist:dist2', dist=dist},
    experiment_factory = dp.MLPFactory{logger=logger},
-   datasource_factory = dp.MnistFactory(),
+   datasource_factory = dp.Cifar10Factory(),
    process_name = process_id,
    logger = logger
 }

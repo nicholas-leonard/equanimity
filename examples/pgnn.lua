@@ -9,8 +9,9 @@ cmd:text('$> th pgnn.lua --collection "MnistMLP1" --hostname "myhost.mydomain.co
 cmd:text('$> th pgnn.lua --collection "Mnist-MLP-baseline1" --hostname "ub" --pid 1 --batchSize 128 --learningRate 0.1 --momentum 0.995 --modelWidth 1024 --widthScales "{1,0.37109375,0.043945312}" --modelDept 4 --progress')
 cmd:text('Options:')
 cmd:option('--learningRate', 0.1, 'learning rate at t=0')
-cmd:option('--firstDecay', 700, 'epoch at which learning rate is first decayed by a factor of 0.1')
-cmd:option('--secondDecay', 200, 'number of epochs after first decay when learning rate is to decayed by another factor of 0.1')
+cmd:option('--decayPoints', '{400,600,700}', 'epochs at which learning rate is decayed')
+cmd:option('--decayFactor', 0.1, 'factor by which learning rate is decayed at each point')
+cmd:option('--linearDecay', false, 'linear decay from first to second from second to third point, etc')
 cmd:option('--maxOutNorm', 1, 'max norm each layers output neuron weights')
 cmd:option('--weightDecay', 0, 'weight decay factor')
 cmd:option('--momentum', 0, 'momentum')
@@ -57,8 +58,9 @@ local hp = {
    random_seed = dp.TimeChoose(),
    model_dept = opt.modelDept,
    learning_rate = opt.learningRate,
-   learning_decay1 = opt.firstDecay,
-   learning_decay2 = opt.secondDecay,
+   decay_points = table.fromString(opt.decayPoints),
+   decay_factor = opt.decayFactor,
+   linear_decay = opt.linearDecay,
    max_out_norm = opt.maxOutNorm,
    weight_decay = opt.weightDecay,
    momentum = opt.momentum,

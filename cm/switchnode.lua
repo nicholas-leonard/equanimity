@@ -9,28 +9,29 @@ SwitchNode.isSwitchNode = true
 
 function SwitchNode:__init(config)
    config = config or {}
-   local args, gater, experts, block_gater, gater_grad_scale, precise_gater
+   local args, gater, experts, gater_grad_scale, zero_targets
       = xlua.unpack(
       {config},
       'SwitchNode', nil,
       {arg='gater', type='dp.Model'},
       {arg='experts', type='table'},
-      {arg='block_gater', type='boolean', default=false,
-       help='when true, gater does not backpropagate '..
-       'into expert(s) feeding into the gater (from previous layers).'},
       {arg='gater_grad_scale', type='number', default=1,
        help='scales the gradient before it is added to gradients from'..
        ' experts which is fedback to previous layer'},
-      {arg='precise_gater', type='boolean', default=false}
+      {arg='zero_targets', type='boolean'}
    )
    config.typename = 'switchnode'
    parent.__init(self, config)
    self._gater = gater
    self._experts = experts
-   self._block_gater = block_gater
    self._models = _.concat({self._gater}, self._experts)
    self._gater_grad_scale = gater_grad_scale
-   self._precise_gater = precise_gater
+   self._zero_targets = zero_targets
+   print(self._zero_targets)
+   -- alloc tensors
+   self._sampled_targets = torch.DoubleTensor()
+   self._gater_targets = torch.DoubleTensor()
+   self._expert_grad = torch.DoubleTensor()
 end
 
 function SwitchNode:setup(config)
@@ -71,7 +72,7 @@ function SwitchNode:_forward(cstate)
    
    -- alphas is a matrix of rows that some to one and weight
    local alphas = gater_ostate.alphas:clone()
-   -- multiply these alphas by any previous alphas
+   -- P(E_l|X) = P(E_l|E_l-1,X)P(E_l-1|X) or P(A)= P(A|B)P(B)
    if self.istate.alphas then
       alphas:cmul(
          self.istate.alphas:reshape(
@@ -82,41 +83,26 @@ function SwitchNode:_forward(cstate)
    local input_act = self.istate.act_double
    self.istate.batch_indices = cstate.batch_indices
    local experts = {}
-   if self.gstate.evaluate or self.gstate.focus == 'examples' then 
-      -- routes is a matrix of indices
-      local routes = gater_ostate.routes
-      -- TODO modify multinomial to return what the following loop returns
-      -- accumulate example indices and alphas for each experts
-      for example_idx = 1,routes:size(1) do
-         for sample_idx = 1,routes:size(2) do
-            local expert_idx = routes[{example_idx,sample_idx}]
-            local expert = experts[expert_idx] 
-               or {examples={}, alphas={}}
-            table.insert(expert.examples, example_idx)
-            table.insert(
-               expert.alphas, 
-               alphas[{example_idx,expert_idx}]
-            )
-            experts[expert_idx] = expert
-         end
-      end   
-   elseif self.gstate.focus == 'experts' then
-      for expert_idx, expert in pairs(gater_ostate.experts) do
-         expert.alphas = alphas[{{},expert_idx}]:index(
-            1, expert.expert_indices
-         )
+   -- routes is a matrix of indices
+   local routes = gater_ostate.routes
+   -- TODO modify multinomial to return what the following loop returns
+   -- accumulate example indices and alphas for each experts
+   for example_idx = 1,routes:size(1) do
+      for sample_idx = 1,routes:size(2) do
+         local expert_idx = routes[{example_idx,sample_idx}]
+         local expert = experts[expert_idx] 
+            or {examples={}, alphas={}}
+         table.insert(expert.examples, example_idx)
+         table.insert(expert.alphas,  alphas[{example_idx,expert_idx}])
          experts[expert_idx] = expert
       end
-   else
-      error"Unknown focus"
-   end
+   end   
    
    self.ostate = {}
    local output_cstates = {}
    for expert_idx, expert in pairs(experts) do
       local expert_branch = self._experts[expert_idx]
-      local expert_indices = expert.expert_indices 
-         or torch.LongTensor(expert.examples) 
+      local expert_indices = expert.expert_indices or torch.LongTensor(expert.examples) 
       local expert_cstate = {
          expert_indices=expert_indices,
          batch_indices=cstate.batch_indices:index(1, expert_indices)
@@ -149,99 +135,62 @@ end
 
 function SwitchNode:_backward(cstates)
    local istate = {}
-   local g_reinforce = {} -- indices for this layer's gater
-   local i_reinforce = {} -- indices for previous layer
-   local gater_targets = {}
-   if self._precise_gater then
-      gater_targets = torch.DoubleTensor(
-         self._gater.ostate.act:size()
-      ):zero()
-   end
-   local backprop = {} -- indices for the previous layer
-   self.istate.act_double = self.istate.act_double 
-      or self.istate.act:double()
+   self._sampled_targets:resize(self._gater.ostate.act:size()):zero()
+   self.istate.act_double = self.istate.act_double or self.istate.act:double()
    local n_example = self.istate.act_double:size(1)
-   local input_grad = self.istate.act:clone():zero()
-   local expert_grad = self.istate.act_double:clone()
+   if not self._input_grad then
+      self._input_grad = self.istate.act:clone()
+   end
+   self._input_grad:resizeAs(self.istate.act):zero()
+   self._expert_grad:resizeAs(self.istate.act_double)
    for expert_idx, expert_cstate in pairs(cstates) do
       local expert_branch = self._experts[expert_idx]
       -- the indices of examples in the original node input batch
       local expert_indices = expert_branch.ostate.expert_indices
       local expert_ostate = self.ostate[expert_idx]
-      -- rescale grads
-      expert_cstate.scale = math.min(
-         1/#expert_cstate.backprop_indices, 1
+      -- size-average param grads
+      expert_cstate.scale = 1/expert_ostate.act:size(1)
+      self._sampled_targets:select(2,expert_idx):indexCopy(
+         1, expert_indices, expert_cstate.gater_targets
       )
-      -- indices of the input to the switch_node to reinforce
-      if not _.isEmpty(expert_cstate.reinforce_indices) then
-         local reinforce_indices = expert_indices:index(
-            1, torch.LongTensor(expert_cstate.reinforce_indices)
-         )
-         g_reinforce[expert_idx] = reinforce_indices
-         i_reinforce[expert_idx] = reinforce_indices:storage():totable()
-         -- gater targets
-         if self._precise_gater and not _.isEmpty(expert_cstate.gater_targets) then
-            gater_targets[{{},expert_idx}]:indexCopy(
-               1, expert_indices, 
-               torch.DoubleTensor(expert_cstate.gater_targets)
-            )
-         end
-      end
-      -- indices of the input to the switch_node to backprop
-      if not _.isEmpty(expert_cstate.backprop_indices) then
-         local backprop_indices = expert_indices:index(
-            1, torch.LongTensor(expert_cstate.backprop_indices)
-         )
-         backprop[expert_idx] = backprop_indices:storage():totable()
-      end
       local expert_istate = expert_branch:backward{
          output=expert_ostate, global=self.global, carry=expert_cstate
       }
-      expert_grad:zero()
-      -- TODO :
-      -- compare speed of this to alternative (copy into expert igrad)
-      expert_grad:indexCopy(
-         1, expert_indices, expert_istate.grad:double()
-      )
+      self._expert_grad:zero()
+      self._expert_grad:indexCopy(1, expert_indices, expert_istate.grad:double())
       -- accumulate input gradients from experts by addition
-      input_grad:add(expert_grad:type(input_grad:type()))
+      self._input_grad:add(self._expert_grad:type(self._input_grad:type()))
    end 
    --[[ gater ]]--
-   
-   -- backward gater to get routes
-   self._gater.ostate.reinforce_indices = g_reinforce
-   self._gater.ostate.gater_targets = gater_targets
+   -- before renormalize, get P(E_l-1|X) for parent gater targets
+   local parent_gater_targets = self._sampled_targets:sum(2)
+   -- p(E_l|E_l-1,X) = p(E_l|X)/P(E_l-1|X) or P(A|B)=P(A)/P(B)
+   self._sampled_targets:cdiv(self._sampled_targets:sum(2):add(0.00001):expandAs(self._sampled_targets))
+   -- keep within target upper and lower bounds
+   self._sampled_targets:mul(0.8):add(0.1)
+   self._gater_targets:resizeAs(self._gater.ostate.act_double)
+   -- non-sampled expert-examples will have zero error (target = act)
+   if self._zero_targets then
+      self._gater_targets:fill(0.1)
+   else
+      self._gater_targets:copy(self._gater.ostate.act_double) 
+   end
+   for expert_idx, expert_cstate in pairs(cstates) do
+      -- insert sampled (non-zero) p(E_l|E_l-1,X) targets into respective slots
+      local expert_indices = self._experts[expert_idx].ostate.expert_indices
+      self._gater_targets:select(2, expert_idx):indexCopy(
+         1, expert_indices, self._sampled_targets:select(2, expert_idx):index(1, expert_indices)
+      )
+   end
+   self._gater.ostate.gater_targets = self._gater_targets
    local gater_istate = self._gater:backward{
       global=self.gstate, carry={scale=1/n_example}
    }
-   --print(torch.abs(input_grad):mean(), torch.abs(gater_istate.grad):mean())
-   if not self._block_gater then
-      input_grad:add(self._gater_grad_scale, gater_istate.grad)
-   end
-   --print(torch.abs(input_grad):mean())
-   self.istate.grad = input_grad
-   if self._precise_gater then
-      gater_targets = gater_targets:sum(2):storage():totable()
-   end
-   -- prepare reinforce indices for the next layer
-   local concat_reinforce = {}
-   for expert_idx, expert_reinforce in pairs(i_reinforce) do
-      for __, batch_idx in ipairs(expert_reinforce) do
-         table.insert(concat_reinforce, batch_idx)
-      end
-   end 
-   -- prepare backprop indices for the next layer
-   local concat_backprop = {}
-   for expert_idx, expert_backprop in pairs(backprop) do
-      for __, batch_idx in ipairs(expert_backprop) do
-         table.insert(concat_backprop, batch_idx)
-      end
-   end
+   self._input_grad:add(self._gater_grad_scale, gater_istate.grad)
+   self.istate.grad = self._input_grad
    local cstate = {
       batch_indices = self.istate.batch_indices,
-      reinforce_indices = _.uniq(concat_reinforce),
-      backprop_indices = _.uniq(concat_backprop),
-      gater_targets = gater_targets
+      gater_targets = parent_gater_targets:reshape(parent_gater_targets:size(1))
    }
    return cstate
 end

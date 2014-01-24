@@ -92,34 +92,20 @@ function NDTFactory:buildModel(opt)
          elseif opt.gater_dept[layer_idx] ~= 1 then
             error"Unsupported gater dept"
          end
-         if opt.precise_gater then
-            gater:add(
-               dp.Precise{
-                  input_size=g_input_size, output_size=opt.n_branch,
-                  dropout=self:buildDropout(opt.gater_dropout and 0.5),
-                  transfer=nn.LogSoftMax(), n_sample=opt.n_sample,
-                  n_reinforce=opt.n_reinforce, n_eval=opt.n_eval,
-                  epsilon=opt.epsilon, lambda=opt.lambda, ema=opt.ema,
-                  mvstate={learn_scale=gater_lrs}
-               }
-            )
-         else
-            gater:add(
-               dp.Equanimous{
-                  input_size=g_input_size, output_size=opt.n_branch,
-                  dropout=self:buildDropout(opt.gater_dropout and 0.5),
-                  transfer=nn.Sigmoid(), n_sample=opt.n_sample,
-                  n_reinforce=opt.n_reinforce, n_eval=opt.n_eval,
-                  epsilon=opt.epsilon, lambda=opt.lambda, ema=opt.ema,
-                  mvstate={learn_scale=gater_lrs}
-               }
-            )
-         end
+         gater:add(
+            dp.Equanimous{
+               input_size=g_input_size, output_size=opt.n_branch,
+               dropout=self:buildDropout(opt.gater_dropout and 0.5),
+               transfer=nn.Sigmoid(), n_sample=opt.n_sample,
+               n_eval=opt.n_eval, epsilon=opt.epsilon,
+               mvstate={learn_scale=gater_lrs}, eval_proto=opt.eval_proto
+            }
+         )
          table.insert(nodes, 
             dp.SwitchNode{
                gater=gater, experts=experts, 
-               gater_grad_scale=opt.gater_grad_scale,
-               precise_gater = opt.precise_gater
+               zero_targets=opt.zero_targets,
+               gater_grad_scale=opt.gater_grad_scale
             }
          )
       end
@@ -148,12 +134,10 @@ function NDTFactory:buildOptimizer(opt)
    end
    return dp[optimizer_name]{
       criterion = nn.ESSRLCriterion{
-         n_reinforce=opt.n_reinforce, n_sample=opt.n_output_sample,
+         n_sample=opt.n_output_sample,
          n_classes=#opt.classes, n_leaf=opt.n_leaf,
-         n_eval=opt.n_eval, n_backprop=opt.n_backprop,
-         accumulator=opt.accumulator, backprop_pad=opt.backprop_pad,
-         yoshua_backprop=opt.yoshua_backprop, 
-         precise_gater=opt.precise_gater
+         n_eval=opt.n_eval, accumulator=opt.accumulator,
+         sparsity_factor=opt.sparsity_factor
       },
       visitor = self:buildVisitor(opt),
       feedback = dp.Confusion(),
@@ -191,7 +175,6 @@ function NDTFactory:build(opt, id)
    opt.n_switch_layer = opt.model_dept-2
    opt.n_output_sample = opt.n_sample^opt.n_switch_layer
    opt.n_leaf = opt.n_branch^opt.n_switch_layer
-   opt.n_reinforce = math.min(opt.n_reinforce, opt.n_output_sample)
    return parent.build(self, opt, id)
 end
 

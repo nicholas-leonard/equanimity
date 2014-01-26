@@ -12,7 +12,7 @@ local ESSRLCriterion, parent = torch.class("nn.ESSRLCriterion")
 function ESSRLCriterion:__init(config)
    config = config or {}
    local args, n_sample, n_leaf, n_eval, n_classes, criterion, 
-      accumulator, sparsity_factor = xlua.unpack(
+      accumulator, sparsity_factor, antispec = xlua.unpack(
       {config},
       'ESSRLCriterion', nil,
       {arg='n_sample', type='number', 
@@ -27,7 +27,9 @@ function ESSRLCriterion:__init(config)
        help='Criterion to be used for optimizing winning experts'},
       {arg='accumulator', type='string', default='softmax'},
       {arg='sparsity_factor', type='number', default=-1,
-       help='increases the sparsity of the equanimous distributions'}
+       help='increases the sparsity of the equanimous distributions'},
+      {arg='antispec', type='boolean', default=false,
+       help='backprop through worst examples in each expert'}
    )
    -- we expect the criterion to be stateless (we use it as a function)
    self._criterion = criterion
@@ -39,7 +41,7 @@ function ESSRLCriterion:__init(config)
    self._n_classes = n_classes
    self._accumulator = accumulator
    self._sparsity_factor = sparsity_factor
-   print(self._sparsity_factor)
+   self._antispec = antispec
    -- statistics :
    ---- records distribution of backprops (train) or samples (eval)
    self._spec_matrix = torch.DoubleTensor(self._n_leaf, self._n_classes) 
@@ -120,6 +122,9 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       ):clone()
       -- weigh gradients by the equanimous distribution of reverse error
       local backprop_weights = self._backprop_weights:select(2, expert_idx):index(1, expert_ostate.batch_indices)
+      if self._antispec then
+         backprop_weights = dp.reverseDist(backprop_weights)
+      end
       expert_ostate.grad:cmul(backprop_weights:reshape(backprop_weights:size(1), 1):expandAs(expert_ostate.grad))
       -- scale weights to full batch of examples
       expert_ostate.grad:mul(expert_ostate.batch_indices:size(1))

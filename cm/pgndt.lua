@@ -46,6 +46,7 @@ cmd:option('--validRatio', 1/6, 'proportion of train set used for validation')
 cmd:option('--epsilon', 0.1, 'probability of sampling from inverse distribution') 
 cmd:option('--accumulator', 'softmax', 'softmax | normalize')
 cmd:option('--trunkLearnScale', 1, 'learning rate scale for the trunk layer')
+cmd:option('--outputLearnScale', 1, 'learning rate scale for the output layer')
 cmd:option('--gaterGradScale', 1, 'what to multiply gater grad by before adding it to grad sent to previous layer expert or trunk')
 cmd:option('--progress', false, 'display progress bar')
 cmd:option('--nopg', false, 'dont use postgresql')
@@ -57,6 +58,8 @@ cmd:option('--minAccuracy', 0.1, 'minimum accuracy that must be maintained after
 cmd:option('--evalProto', 'MAP', 'how to determine routes from gater activations during evaluation')
 cmd:option('--zeroTargets', false, 'zero non-sampled expert-example targets instead using activation as target')
 cmd:option('--sparsityFactor', -1, 'increases sparsity of equanimous distribution')
+cmd:option('--antispec', false, 'backprop through worst examples in each expert')
+cmd:option('--excludeMomentum', '', 'comma-separated string of tags to exclude from momentum. example: "gater,output"'}
 cmd:text()
 opt = cmd:parse(arg or {})
 
@@ -92,6 +95,7 @@ local hp = {
    trunk_learn_scale = opt.trunkLearnScale,
    expert_width_scales = table.fromString(opt.expertWidthScales),
    expert_learn_scales = table.fromString(opt.expertLearnScales),
+   output_learn_scale = opt.outputLearnScale,
    gater_width_scales = table.fromString(opt.gaterWidthScales),
    gater_learn_scales = table.fromString(opt.gaterLearnScales),
    activation = opt.activation,
@@ -116,7 +120,9 @@ local hp = {
    max_error = opt.minAccuracy,
    eval_proto = opt.evalProto,
    zero_targets = opt.zeroTargets,
-   sparsity_factor = opt.sparsityFactor
+   sparsity_factor = opt.sparsityFactor,
+   antispec = opt.antispec,
+   exclude_momentum = _.split(opt.excludeMomentum)
 }
 
 local process_id = opt.hostname .. '.' .. opt.pid

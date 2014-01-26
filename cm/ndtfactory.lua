@@ -24,7 +24,7 @@ function NDTFactory:buildModel(opt)
          input_size=opt.feature_size, output_size=opt.expert_width,
          transfer=self:buildTransfer(opt.activation),
          dropout=self:buildDropout(opt.input_dropout and 0.2),
-         mvstate={learn_scale=opt.trunk_learn_scale}
+         mvstate={learn_scale=opt.trunk_learn_scale}, tags={'trunk'}
       }
    )
    print('trunk has '..opt.expert_width..' hidden neurons')
@@ -54,15 +54,15 @@ function NDTFactory:buildModel(opt)
                input_size=input_size, output_size=expert_size,
                transfer=self:buildTransfer(opt.activation),
                dropout=self:buildDropout(opt.expert_dropout and 0.5),
-               mvstate={learn_scale=expert_lrs}
+               mvstate={learn_scale=expert_lrs}, tags={'expert'}
             }
             if layer_idx == opt.n_switch_layer then
                -- last layer of experts is 2-layer MLP
                local output = dp.Neural{
                   input_size=expert_size, output_size=#opt.classes,
-                  transfer=nn.LogSoftMax(),
+                  transfer=nn.LogSoftMax(), tags={'output'},
                   dropout=self:buildDropout(opt.output_dropout and 0.5),
-                  mvstate={learn_scale=expert_lrs}
+                  mvstate={learn_scale=opt.output_learn_scale}
                }
                -- share output params (convolve output layer on experts)
                if opt.share_output then
@@ -85,7 +85,7 @@ function NDTFactory:buildModel(opt)
                   input_size=input_size, output_size=gater_size,
                   transfer=self:buildTransfer(opt.activation),
                   dropout=self:buildDropout(opt.gater_dropout and 0.5),
-                  mvstate={learn_scale=gater_lrs}
+                  mvstate={learn_scale=gater_lrs}, tags={'gater'}
                }
             )
             g_input_size = gater_size
@@ -97,7 +97,7 @@ function NDTFactory:buildModel(opt)
                input_size=g_input_size, output_size=opt.n_branch,
                dropout=self:buildDropout(opt.gater_dropout and 0.5),
                transfer=nn.Sigmoid(), n_sample=opt.n_sample,
-               n_eval=opt.n_eval, epsilon=opt.epsilon,
+               n_eval=opt.n_eval, epsilon=opt.epsilon, tags={'gater'},
                mvstate={learn_scale=gater_lrs}, eval_proto=opt.eval_proto
             }
          )
@@ -137,7 +137,7 @@ function NDTFactory:buildOptimizer(opt)
          n_sample=opt.n_output_sample,
          n_classes=#opt.classes, n_leaf=opt.n_leaf,
          n_eval=opt.n_eval, accumulator=opt.accumulator,
-         sparsity_factor=opt.sparsity_factor
+         sparsity_factor=opt.sparsity_factor, antispec=opt.antispec
       },
       visitor = self:buildVisitor(opt),
       feedback = dp.Confusion(),

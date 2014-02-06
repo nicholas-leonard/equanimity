@@ -16,6 +16,47 @@ function NDTFactory:__init(config)
    parent.__init(self, config)
 end
 
+function NDTFactory:buildGater(opt, layer_idx, input_size)
+   local gater_size = math.ceil(
+      opt.gater_width_scales[layer_idx] 
+      * opt.gater_width/opt.n_branch^(layer_idx-1)
+   )
+   local gater_lrs = opt.gater_learn_scales[layer_idx] 
+   local gater = dp.Sequential()
+   local g_input_size = input_size
+   if opt.gater_dept[layer_idx] == 2 then
+      gater:add(
+         dp.Neural{
+            input_size=input_size, output_size=gater_size,
+            transfer=self:buildTransfer(opt.activation),
+            dropout=self:buildDropout(opt.gater_dropout and 0.5),
+            mvstate={learn_scale=gater_lrs}, tags={['gater']=true}
+         }
+      )
+      g_input_size = gater_size
+   elseif opt.gater_dept[layer_idx] ~= 1 then
+      error"Unsupported gater dept"
+   end
+   gater:add(
+      dp.Equanimous{
+         input_size=g_input_size, output_size=opt.n_branch,
+         dropout=self:buildDropout(opt.gater_dropout and 0.5),
+         transfer=nn.Sigmoid(), n_sample=opt.n_sample,
+         n_eval=opt.n_eval, epsilon=opt.epsilon, tags={['gater']=true},
+         mvstate={learn_scale=gater_lrs}, eval_proto=opt.eval_proto
+      }
+   )
+   print('gater with '..gater_size..' hidden neurons')
+   return gater
+end
+
+function NDTFactory:buildNode(opt, layer_idx, gater, experts)
+   return dp.SwitchNode{
+      gater=gater, experts=experts, zero_targets=opt.zero_targets,
+      gater_grad_scale=opt.gater_grad_scale
+   }
+end
+
 function NDTFactory:buildModel(opt)
    local ndt = dp.Sequential()
    -- trunk layer
@@ -24,7 +65,7 @@ function NDTFactory:buildModel(opt)
          input_size=opt.feature_size, output_size=opt.expert_width,
          transfer=self:buildTransfer(opt.activation),
          dropout=self:buildDropout(opt.input_dropout and 0.2),
-         mvstate={learn_scale=opt.trunk_learn_scale}, tags={'trunk'}
+         mvstate={learn_scale=opt.trunk_learn_scale}, tags={['trunk']=true}
       }
    )
    print('trunk has '..opt.expert_width..' hidden neurons')
@@ -37,15 +78,9 @@ function NDTFactory:buildModel(opt)
          opt.expert_width_scales[layer_idx] 
          * opt.expert_width/opt.n_branch^layer_idx
       )
-      local gater_size = math.ceil(
-         opt.gater_width_scales[layer_idx] 
-         * opt.gater_width/opt.n_branch^(layer_idx-1)
-      )
       local expert_lrs = opt.expert_learn_scales[layer_idx] 
-      local gater_lrs = opt.gater_learn_scales[layer_idx] 
       print(n_nodes*opt.n_branch..' experts with '
             ..expert_size..' hidden neurons')
-      print(n_nodes..' gaters with '..gater_size..' hidden neurons')
       local shared_output
       for node_idx = 1,n_nodes do
          local experts = {}
@@ -54,13 +89,13 @@ function NDTFactory:buildModel(opt)
                input_size=input_size, output_size=expert_size,
                transfer=self:buildTransfer(opt.activation),
                dropout=self:buildDropout(opt.expert_dropout and 0.5),
-               mvstate={learn_scale=expert_lrs}, tags={'expert'}
+               mvstate={learn_scale=expert_lrs}, tags={['expert']=true}
             }
             if layer_idx == opt.n_switch_layer then
                -- last layer of experts is 2-layer MLP
                local output = dp.Neural{
                   input_size=expert_size, output_size=#opt.classes,
-                  transfer=nn.LogSoftMax(), tags={'output'},
+                  transfer=nn.LogSoftMax(), tags={['output']=true},
                   dropout=self:buildDropout(opt.output_dropout and 0.5),
                   mvstate={learn_scale=opt.output_learn_scale}
                }
@@ -76,37 +111,9 @@ function NDTFactory:buildModel(opt)
             end
             table.insert(experts, expert)
          end
-         --[[ gater ]]--
-         local gater = dp.Sequential()
-         local g_input_size = input_size
-         if opt.gater_dept[layer_idx] == 2 then
-            gater:add(
-               dp.Neural{
-                  input_size=input_size, output_size=gater_size,
-                  transfer=self:buildTransfer(opt.activation),
-                  dropout=self:buildDropout(opt.gater_dropout and 0.5),
-                  mvstate={learn_scale=gater_lrs}, tags={'gater'}
-               }
-            )
-            g_input_size = gater_size
-         elseif opt.gater_dept[layer_idx] ~= 1 then
-            error"Unsupported gater dept"
-         end
-         gater:add(
-            dp.Equanimous{
-               input_size=g_input_size, output_size=opt.n_branch,
-               dropout=self:buildDropout(opt.gater_dropout and 0.5),
-               transfer=nn.Sigmoid(), n_sample=opt.n_sample,
-               n_eval=opt.n_eval, epsilon=opt.epsilon, tags={'gater'},
-               mvstate={learn_scale=gater_lrs}, eval_proto=opt.eval_proto
-            }
-         )
-         table.insert(nodes, 
-            dp.SwitchNode{
-               gater=gater, experts=experts, 
-               zero_targets=opt.zero_targets,
-               gater_grad_scale=opt.gater_grad_scale
-            }
+         local gater = self:buildGater(opt, layer_idx, input_size)
+         table.insert(
+            nodes, self:buildNode(opt, layer_idx, gater, experts)
          )
       end
       input_size = expert_size
@@ -189,7 +196,7 @@ function PGNDTFactory:__init(config)
    config = config or {}
    local args, pg = xlua.unpack(
       {config},
-      'PGMLPFactory', nil,
+      'PGNDTFactory', nil,
       {arg='pg', type='dp.Postgres', help='default is dp.Postgres()'}
    )
    parent.__init(self, config)

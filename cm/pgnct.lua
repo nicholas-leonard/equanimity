@@ -4,9 +4,9 @@ require 'cm'
 
 cmd = torch.CmdLine()
 cmd:text()
-cmd:text('PostgreSQL-backed Neural Decision Tree Training/Optimization')
+cmd:text('PostgreSQL-backed Neural Clustering Tree Training/Optimization')
 cmd:text('Example:')
-cmd:text('$> th pgndt.lua --collection "MNIST-NDT-2" --hostname "nps" --pid 1 --type cuda --maxTries 100 --maxEpoch 1000 --batchSize 128 --nBranch 8 --learningRate 0.01 --momentum 0.9995 --activation ReLU --gaterWidth 320 --gaterWidthScales "{1,2,2}" --gaterDept "{2,2,2}" --expertWidth 2048 --expertWidthScales "{2,2,2}" --nSwitchLayer 1 --nReinforce 1 --nSample 2 --nEval 1')
+cmd:text('$> th pgnct.lua --collection "Mnist-NCT-8-2" --hostname "nps" --pid 1 --type cuda --maxTries 100 --maxEpoch 1000 --batchSize 128 --learningRate 0.1 --momentum 0.9 --encoding Sigmoid --activation Tanh --gaterWidth 10 --gaterWidthScales "{1}" --gaterDept "{2}" --expertWidth 1024 --expertWidthScales "{2}" --excludeMomentum "gater" --nSwitchLayer 1 --nBranch 8 --nSample 2 --nEval 2 --decayPoints "{200,400,1000}" --encoderNoise 0 --encodeLearnScales "{1}" --kmeansLearnScales "{1}" --progress')
 cmd:text('Options:')
 cmd:option('--nEval', 1, 'number of experts chosen during evaluation')
 cmd:option('--nSample', 2, 'number of experts sampled during training')
@@ -24,17 +24,19 @@ cmd:option('--expertWidth', 1024, 'width of trunk and combined width of experts 
 cmd:option('--expertWidthScales', '{1,1,1}', 'see expertWidth')
 cmd:option('--expertLearnScales', '{1,1,1}', 'scales the learning rate')
 cmd:option('--gaterWidth', 256, 'width of gater and combinded width of gaters times gater scale factor')
-cmd:option('--gaterWidthScales', '{1,2,2}', 'see gaterWidth')
-cmd:option('--gaterLearnScales', '{1,1,1}', 'scales the learning rate')
+cmd:option('--gaterWidthScales', '{1,1,1}', 'see gaterWidth')
+cmd:option('--encodeLearnScales', '{1,1,1}', 'scales the learning rate of gater auto-encoders')
+cmd:option('--kmeansLearnScales', '{1,1,1}', 'scales the learning rate of gater kmeans')
 cmd:option('--gaterDept', '{2,2,2}', 'dept of gaters in different layers')
 cmd:option('--activation', 'Tanh', 'activation function')
+cmd:option('--encoding', 'Tanh', 'activation function used on hidden neurons in auto-encoders')
+cmd:option('--encoderNoise', 0, 'dropout probability of [denoising] auto-encoder')
 cmd:option('--batchSize', 32, 'number of examples per batch')
 cmd:option('--type', 'double', 'type: double | float | cuda')
 cmd:option('--maxEpoch', 100, 'maximum number of epochs to run')
 cmd:option('--maxTries', 30, 'maximum number of epochs to try to find a better local minima for early-stopping')
 cmd:option('--inputDropout', false, 'apply dropout on inputs, requires "nnx" luarock')
 cmd:option('--expertDropout', false, 'apply dropout on experts, requires "nnx" luarock')
-cmd:option('--gaterDropout', false, 'apply dropout on gaters, requires "nnx" luarock')
 cmd:option('--outputDropout', false, 'apply dropout on outputs, requires "nnx" luarock')
 cmd:option('--shareOutput', false, 'share parameters of output layer')
 cmd:option('--useDevice', 1, 'sets the device (GPU) to use for this hyperoptimization')
@@ -43,11 +45,9 @@ cmd:option('--hostname', 'localhost', 'hostname for this host')
 cmd:option('--pid', 0, 'identifies process on host. Only important that each process on same host have different names')
 cmd:option('--type', 'double', 'type: double | float | cuda')
 cmd:option('--validRatio', 1/6, 'proportion of train set used for validation')
-cmd:option('--epsilon', 0.1, 'probability of sampling from inverse distribution') 
-cmd:option('--accumulator', 'softmax', 'softmax | normalize')
+cmd:option('--accumulator', 'normalize', 'softmax | normalize')
 cmd:option('--trunkLearnScale', 1, 'learning rate scale for the trunk layer')
 cmd:option('--outputLearnScale', 1, 'learning rate scale for the output layer')
-cmd:option('--gaterGradScale', 1, 'what to multiply gater grad by before adding it to grad sent to previous layer expert or trunk')
 cmd:option('--progress', false, 'display progress bar')
 cmd:option('--nopg', false, 'dont use postgresql')
 cmd:option('--datasource', 'Mnist', 'datasource to use : Mnist | NotMnist | Cifar10')
@@ -55,10 +55,7 @@ cmd:option('--zca_gcn', false, 'apply GCN followed by ZCA input preprocessing')
 cmd:option('--standardize', false, 'apply Standardize input preprocessing')
 cmd:option('--lecunLCN', false, 'apply LeCunLCN preprocessing to datasource inputs')
 cmd:option('--minAccuracy', 0.1, 'minimum accuracy that must be maintained after 10 epochs')
-cmd:option('--evalProto', 'MAP', 'how to determine routes from gater activations during evaluation')
-cmd:option('--zeroTargets', false, 'zero non-sampled expert-example targets instead using activation as target')
-cmd:option('--sparsityFactor', -1, 'increases sparsity of equanimous distribution')
-cmd:option('--antispec', false, 'backprop through worst examples in each expert')
+cmd:option('--simProto', 'rev_dist', 'similarity protocol used in k-means gater: rev_dist | uniform')
 cmd:option('--excludeMomentum', '', 'comma-separated string of tags to exclude from momentum. example: "gater,output"')
 cmd:text()
 opt = cmd:parse(arg or {})
@@ -96,31 +93,29 @@ local hp = {
    expert_learn_scales = table.fromString(opt.expertLearnScales),
    output_learn_scale = opt.outputLearnScale,
    gater_width_scales = table.fromString(opt.gaterWidthScales),
-   gater_learn_scales = table.fromString(opt.gaterLearnScales),
+   encode_learn_scales = table.fromString(opt.encodeLearnScales),
+   kmeans_learn_scales = table.fromString(opt.kmeansLearnScales),
    activation = opt.activation,
+   encoding = opt.encoding,
+   encoder_noise = opt.encoderNoise,
    input_dropout = opt.inputDropout,
    expert_dropout = opt.expertDropout,
-   gater_dropout = opt.gaterDropout,
    output_dropout = opt.outputDropout,
    n_branch = opt.nBranch,
    n_sample = opt.nSample,
    n_eval = opt.nEval,
-   epsilon = opt.epsilon,
    share_output = opt.shareOutput,
    valid_ratio = opt.validRatio,
    accumulator = opt.accumulator,
    pid = opt.pid,
    hostname = opt.hostname,
    collection = opt.collection,
-   gater_grad_scale = opt.gaterGradScale,
    zca_gcn = opt.zca_gcn,
    standardize = opt.standardize,
    lecunlcn = opt.lecunLCN,
    max_error = opt.minAccuracy,
-   eval_proto = opt.evalProto,
+   sim_proto = opt.simProto,
    zero_targets = opt.zeroTargets,
-   sparsity_factor = opt.sparsityFactor,
-   antispec = opt.antispec,
    exclude_momentum = _.split(opt.excludeMomentum)
 }
 
@@ -134,7 +129,7 @@ if opt.nopg then
       hyperparam_sampler = dp.PriorSampler{--only samples random_seed
          name='NDT+'..opt.datasource..':user_dist', dist=hp 
       },
-      experiment_factory = dp.NDTFactory{
+      experiment_factory = dp.NCTFactory{
          logger=logger,
          save_strategy=dp.SaveToFile{hostname=opt.hostname}
       },
@@ -154,7 +149,7 @@ hyperopt = dp.HyperOptimizer{
    hyperparam_sampler = dp.PriorSampler{--only samples random_seed
       name='NDT+'..opt.datasource..':user_dist', dist=hp 
    },
-   experiment_factory = dp.PGNDTFactory{
+   experiment_factory = dp.PGNCTFactory{
       logger=logger, pg=pg, 
       save_strategy=dp.PGSaveToFile{hostname=opt.hostname, pg=pg}
    },

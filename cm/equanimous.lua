@@ -99,6 +99,10 @@ function Equanimous:_evaluate(cstate)
       return self._evaluateMAP(self, cstate)
    elseif self._eval_proto == 'EMAP' then
       return self._evaluateEMAP(self, cstate)
+   elseif self._eval_proto == 'AMAP' then
+      return self._evaluateAMAP(self, cstate)
+   elseif self._eval_proto == 'Random' then
+      return self._evaluateRandom(self, cstate)
    end
    error"NotImplemented"
 end
@@ -108,6 +112,25 @@ function Equanimous:_evaluateMAP(cstate)
       self.ostate.act_double, ---self._targets[1]
       -self.ostate.act_double:min(2):expandAs(self.ostate.act_double)
    )
+   alphas:cdiv(alphas:sum(2):add(0.00001):expandAs(alphas))
+   self.ostate.alphas = alphas
+   local __, routes = torch.sort(alphas, 2, true)
+   self.ostate.routes = routes[{{},{1,self._n_sample}}]
+end
+
+function Equanimous:_evaluateAMAP(cstate)
+   local alphas = torch.add(
+      self.ostate.act_double, ---self._targets[1]
+      -self.ostate.act_double:min(2):expandAs(self.ostate.act_double)
+   )
+   alphas:cdiv(alphas:sum(2):add(0.00001):expandAs(alphas))
+   self.ostate.alphas = dp.reverseDist(alphas)
+   local __, routes = torch.sort(alphas, 2, true)
+   self.ostate.routes = routes[{{},{1,self._n_sample}}]
+end
+
+function Equanimous:_evaluateRandom(cstate)
+   local alphas = torch.rand(self.ostate.act_double:size())
    alphas:cdiv(alphas:sum(2):add(0.00001):expandAs(alphas))
    self.ostate.alphas = alphas
    local __, routes = torch.sort(alphas, 2, true)

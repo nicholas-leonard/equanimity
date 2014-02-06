@@ -84,7 +84,7 @@ hyperopt = dp.HyperOptimizer{
    id_gen = dp.EIDGenerator(process_id),
    hyperparam_sampler = dp.PriorSampler{name='CIFAR10+Mnist:dist2', dist=dist},
    experiment_factory = dp.MLPFactory{logger=logger},
-   datasource_factory = dp.Cifar10Factory(),
+   datasource_factory = dp.ImageClassFactory(),
    process_name = process_id,
    logger = logger
 }

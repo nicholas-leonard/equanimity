@@ -1,11 +1,6 @@
 require 'cm'
 
--- TODO :
--- hyperparam sampler
--- phase 2
--- table of values
--- graph of values.
--- conv class
+-- DEPRECATED
 
 --[[parse command line arguments]]--
 

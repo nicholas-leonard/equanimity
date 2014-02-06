@@ -1,5 +1,6 @@
 ------------------------------------------------------------------------
 --[[ Precise ]]--
+-- DEPRECATED
 -- samples routes from multinomial
 -- reinforces winning routes using MSE with error distribution as targets
 -- zero the grads of unsampled experts

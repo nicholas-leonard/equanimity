@@ -1,12 +1,12 @@
-require 'dp'
+require 'en'
 
 --[[parse command line arguments]]--
 cmd = torch.CmdLine()
 cmd:text()
-cmd:text('PostgreSQL MLP Training/Optimization')
+cmd:text('PostgreSQL Enhancer Training/Optimization')
 cmd:text('Example:')
-cmd:text('$> th pgnn.lua --collection "MnistMLP1" --hostname "myhost.mydomain.com" --pid 1 --batchSize 128 --momentum 0.5')
-cmd:text('$> th pgnn.lua --collection "Mnist-MLP-baseline1" --hostname "ub" --pid 1 --batchSize 128 --learningRate 0.1 --momentum 0.995 --modelWidth 1024 --widthScales "{1,0.37109375,0.043945312}" --modelDept 4 --progress')
+cmd:text('$> th pgen.lua --collection "Mnist-En-1" --hostname "myhost.mydomain.com" --pid 1 --batchSize 128 --momentum 0.5')
+cmd:text('$> th pgen.lua --collection "Mnist-En-baseline1" --hostname "ub" --pid 1 --batchSize 128 --learningRate 0.1 --momentum 0.995 --modelWidth 1024 --layerScales "{1,1,1}" --modelDept 3 --progress')
 cmd:text('Options:')
 cmd:option('--learningRate', 0.1, 'learning rate at t=0')
 cmd:option('--decayPoints', '{400,600,700}', 'epochs at which learning rate is decayed')
@@ -17,15 +17,22 @@ cmd:option('--weightDecay', 0, 'weight decay factor')
 cmd:option('--momentum', 0, 'momentum')
 cmd:option('--nesterov', false, 'use nesterov momentum')
 cmd:option('--modelWidth', 1024, 'width of the model in hidden neurons')
-cmd:option('--widthScales', '{1,1,1}', 'scales the width of different layers')
-cmd:option('--modelDept', 2, 'number of Neural layers (affine transform followed by transfer function) to use')
-cmd:option('--activation', 'Tanh', 'activation function')
+cmd:option('--layerScales', '{1,1,1}', 'scales the width of different layers')
+cmd:option('--encoderScales', '{0.2,0.2,0.2}', 'scales the width of different layer encoders')
+cmd:option('--modelDept', 3, 'number of Neural layers (affine transform followed by transfer function) to use')
+cmd:option('--activation', 'Tanh', 'layer activation function')
+cmd:option('--encoding', 'Sigmoid', 'encoder activation function')
+cmd:option('--evalProto', 'layer-only', 'evaluation protocol : layer-only | average | product')
+cmd:option('--updateScales', '{0.1,0.1,0.1}', 'learning rate for substracting act gradient from act')
+cmd:option('--mixtureCoeffs', '{0.5,0.5,0.5}', 'Weight of layer activations. does not apply to evalProto=layer-only')
+cmd:option('--bpaeCoeffs', '{0,0,0}', 'backpropagate auto-encoder coeff*gradients into layer')
+cmd:option('--inputNoises', '{0,0,0}', 'dropout prob for noise into encoder')
 cmd:option('--batchSize', 128, 'number of examples per batch')
 cmd:option('--type', 'double', 'type: double | float | cuda')
 cmd:option('--useDevice', 1, 'sets the device (GPU) to use')
 cmd:option('--maxEpoch', 2000, 'maximum number of epochs to run')
 cmd:option('--maxTries', 200, 'maximum number of epochs to try to find a better local minima for early-stopping')
-cmd:option('--dropoutProbs', '{0}', 'probability of dropout on inputs to each layer, requires "nnx" luarock')
+--cmd:option('--dropoutProbs', '{0}', 'probability of dropout on inputs to each layer, requires "nnx" luarock')
 cmd:option('--datasource', 'Mnist', 'datasource to use : Mnist | NotMnist | Cifar10')
 cmd:option('--zca_gcn', false, 'apply GCN followed by ZCA input preprocessing')
 cmd:option('--standardize', false, 'apply Standardize input preprocessing')
@@ -48,7 +55,7 @@ end
 --[[ hyperparameter sampling distribution ]]--
 
 local hp = {
-   version = 1,
+   version = 2,
    max_tries = opt.maxTries,
    max_epoch = opt.maxEpoch,
    model_type = opt.type,
@@ -65,9 +72,16 @@ local hp = {
    momentum = opt.momentum,
    nesterov = opt.nesterov,
    model_width = opt.modelWidth,
-   width_scales = table.fromString(opt.widthScales),
+   layer_scales = table.fromString(opt.layerScales),
+   encoder_scales = table.fromString(opt.encoderScales),
    activation = opt.activation,
-   dropout_probs = table.fromString(opt.dropoutProbs),
+   encoding = opt.encoding,
+   eval_proto = opt.evalProto,
+   update_scales = table.fromString(opt.updateScales),
+   mixture_coeffs = table.fromString(opt.mixtureCoeffs),
+   input_noises = table.fromString(opt.inputNoises),
+   bpae_coeffs = table.fromString(opt.bpaeCoeffs),
+   --dropout_probs = table.fromString(opt.dropoutProbs),
    valid_ratio = opt.validRatio,
    pid = opt.pid,
    hostname = opt.hostname,
@@ -89,7 +103,7 @@ if opt.nopg then
       hyperparam_sampler = dp.PriorSampler{--only samples random_seed
          name='MLP+'..opt.datasource..':user_dist', dist=hp 
       },
-      experiment_factory = dp.MLPFactory{
+      experiment_factory = dp.EnFactory{
          logger=logger,
          save_strategy=dp.SaveToFile{hostname=opt.hostname}
       },
@@ -107,9 +121,9 @@ hyperopt = dp.HyperOptimizer{
    collection_name=opt.collection,
    id_gen=dp.PGEIDGenerator{pg=pg},
    hyperparam_sampler = dp.PriorSampler{--only samples random_seed
-      name='MLP+'..opt.datasource..':user_dist', dist=hp 
+      name='En+'..opt.datasource..':user_dist', dist=hp 
    },
-   experiment_factory = dp.PGMLPFactory{
+   experiment_factory = dp.PGEnFactory{
       logger=logger, pg=pg, 
       save_strategy=dp.PGSaveToFile{hostname=opt.hostname, pg=pg}
    },

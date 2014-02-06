@@ -27,7 +27,6 @@ function SwitchNode:__init(config)
    self._models = _.concat({self._gater}, self._experts)
    self._gater_grad_scale = gater_grad_scale
    self._zero_targets = zero_targets
-   print(self._zero_targets)
    -- alloc tensors
    self._sampled_targets = torch.DoubleTensor()
    self._gater_targets = torch.DoubleTensor()
@@ -70,7 +69,7 @@ function SwitchNode:_forward(cstate)
       gater_ostate = self._gater:forward(gater_istate)
    end
    
-   -- alphas is a matrix of rows that some to one and weight
+   -- alphas is a matrix of rows that sum to one and weigh experts
    local alphas = gater_ostate.alphas:clone()
    -- P(E_l|X) = P(E_l|E_l-1,X)P(E_l-1|X) or P(A)= P(A|B)P(B)
    if self.istate.alphas then
@@ -93,7 +92,7 @@ function SwitchNode:_forward(cstate)
          local expert = experts[expert_idx] 
             or {examples={}, alphas={}}
          table.insert(expert.examples, example_idx)
-         table.insert(expert.alphas,  alphas[{example_idx,expert_idx}])
+         table.insert(expert.alphas, alphas[{example_idx,expert_idx}])
          experts[expert_idx] = expert
       end
    end   

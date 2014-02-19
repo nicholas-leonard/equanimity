@@ -44,10 +44,15 @@ cmd:option('--pid', 0, 'identifies process on host. Only important that each pro
 cmd:option('--type', 'double', 'type: double | float | cuda')
 cmd:option('--validRatio', 1/6, 'proportion of train set used for validation')
 cmd:option('--epsilon', 0.1, 'probability of sampling from inverse distribution') 
+cmd:option('--epsilonDecay', 0.99, 'epsilon decay')
+cmd:option('--temperature', 0.1, 'high temperature makes multinomial distribution more uniform') 
+cmd:option('--temperatureDecay', 0.99, 'temperature decay')
 cmd:option('--accumulator', 'softmax', 'softmax | normalize')
 cmd:option('--trunkLearnScale', 1, 'learning rate scale for the trunk layer')
 cmd:option('--outputLearnScale', 1, 'learning rate scale for the output layer')
 cmd:option('--gaterGradScale', 1, 'what to multiply gater grad by before adding it to grad sent to previous layer expert or trunk')
+cmd:option('--maxMainClass', 0.5, 'maximum proportion of the main class in an expert')
+cmd:option('--welfareFactor', 0, 'weight of the constraint on the maximum main class')
 cmd:option('--progress', false, 'display progress bar')
 cmd:option('--nopg', false, 'dont use postgresql')
 cmd:option('--datasource', 'Mnist', 'datasource to use : Mnist | NotMnist | Cifar10')
@@ -71,7 +76,7 @@ end
 --[[ hyperparameters ]]--
 
 local hp = {
-   version = 5,
+   version = 7,
    progress = opt.progress,
    max_tries = opt.maxTries,
    max_epoch = opt.maxEpoch,
@@ -106,6 +111,9 @@ local hp = {
    n_sample = opt.nSample,
    n_eval = opt.nEval,
    epsilon = opt.epsilon,
+   epsilon_decay = opt.epsilonDecay,
+   temperature = opt.temperature,
+   temperature_decay = opt.temperatureDecay,
    share_output = opt.shareOutput,
    valid_ratio = opt.validRatio,
    accumulator = opt.accumulator,
@@ -121,7 +129,9 @@ local hp = {
    zero_targets = opt.zeroTargets,
    sparsity_factor = opt.sparsityFactor,
    antispec = opt.antispec,
-   exclude_momentum = _.split(opt.excludeMomentum)
+   max_main_class = opt.maxMainClass,
+   welfare_factor = opt.welfareFactor,
+   exclude_momentum = _.split(opt.excludeMomentum, ',')
 }
 
 local process_id = opt.hostname .. '.' .. opt.pid

@@ -24,7 +24,7 @@ function NDTFactory:buildGater(opt, layer_idx, input_size)
    local gater_lrs = opt.gater_learn_scales[layer_idx] 
    local gater = dp.Sequential()
    local g_input_size = input_size
-   if opt.gater_dept[layer_idx] == 2 then
+   for i = 1,opt.gater_dept[layer_idx]-1 do
       gater:add(
          dp.Neural{
             input_size=input_size, output_size=gater_size,
@@ -34,19 +34,20 @@ function NDTFactory:buildGater(opt, layer_idx, input_size)
          }
       )
       g_input_size = gater_size
-   elseif opt.gater_dept[layer_idx] ~= 1 then
-      error"Unsupported gater dept"
    end
+   print('gater with '..gater_size..' hidden neurons X '..
+         opt.gater_dept[layer_idx]..' layers.')
    gater:add(
       dp.Equanimous{
          input_size=g_input_size, output_size=opt.n_branch,
          dropout=self:buildDropout(opt.gater_dropout and 0.5),
-         transfer=nn.Sigmoid(), n_sample=opt.n_sample,
+         n_sample=opt.n_sample, temperature=opt.temperature,
+         temperature_decay=opt.temperature_decay, 
+         epsilon_decay=opt.epsilon_decay,
          n_eval=opt.n_eval, epsilon=opt.epsilon, tags={['gater']=true},
          mvstate={learn_scale=gater_lrs}, eval_proto=opt.eval_proto
       }
    )
-   print('gater with '..gater_size..' hidden neurons')
    return gater
 end
 
@@ -95,7 +96,7 @@ function NDTFactory:buildModel(opt)
                -- last layer of experts is 2-layer MLP
                local output = dp.Neural{
                   input_size=expert_size, output_size=#opt.classes,
-                  transfer=nn.LogSoftMax(), tags={['output']=true},
+                  transfer=nn.SoftMax(), tags={['output']=true},
                   dropout=self:buildDropout(opt.output_dropout and 0.5),
                   mvstate={learn_scale=opt.output_learn_scale}
                }
@@ -144,7 +145,9 @@ function NDTFactory:buildOptimizer(opt)
          n_sample=opt.n_output_sample,
          n_classes=#opt.classes, n_leaf=opt.n_leaf,
          n_eval=opt.n_eval, accumulator=opt.accumulator,
-         sparsity_factor=opt.sparsity_factor, antispec=opt.antispec
+         sparsity_factor=opt.sparsity_factor, antispec=opt.antispec,
+         max_main_class=opt.max_main_class, 
+         welfare_factor=opt.welfare_factor
       },
       visitor = self:buildVisitor(opt),
       feedback = dp.Confusion(),

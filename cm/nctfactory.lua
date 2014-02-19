@@ -31,7 +31,7 @@ function NCTFactory:buildGater(opt, layer_idx, input_size)
          dp.AutoEncoder{
             input_size=input_size, hidden_size=gater_size,
             hidden_transfer=self:buildTransfer(opt.encoding),
-            output_transfer=self:buildTransfer(opt.activation),
+            output_transfer=(layer_idx == 1 and self:buildTransfer(opt.activation)) or nn.Sigmoid(),
             input_noise=self:buildDropout(opt.encoder_noise),
             mvstate={learn_scale=encode_lrs}, 
             tags={['gater']=true,['auto-encoder']=true}

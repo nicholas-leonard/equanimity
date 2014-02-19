@@ -68,7 +68,7 @@ end
 --[[ hyperparameters ]]--
 
 local hp = {
-   version = 5,
+   version = 6,
    progress = opt.progress,
    max_tries = opt.maxTries,
    max_epoch = opt.maxEpoch,
@@ -116,7 +116,7 @@ local hp = {
    max_error = opt.minAccuracy,
    sim_proto = opt.simProto,
    zero_targets = opt.zeroTargets,
-   exclude_momentum = _.split(opt.excludeMomentum)
+   exclude_momentum = _.split(opt.excludeMomentum, ',')
 }
 
 local process_id = opt.hostname .. '.' .. opt.pid

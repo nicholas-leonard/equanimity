@@ -134,7 +134,7 @@ end
 
 function SwitchNode:_backward(cstates)
    local istate = {}
-   self._sampled_targets:resize(self._gater.ostate.act:size()):zero()
+   self._sampled_targets:resize(self._gater.ostate.act_double:size()):zero()
    self.istate.act_double = self.istate.act_double or self.istate.act:double()
    local n_example = self.istate.act_double:size(1)
    if not self._input_grad then
@@ -164,13 +164,13 @@ function SwitchNode:_backward(cstates)
    -- before renormalize, get P(E_l-1|X) for parent gater targets
    local parent_gater_targets = self._sampled_targets:sum(2)
    -- p(E_l|E_l-1,X) = p(E_l|X)/P(E_l-1|X) or P(A|B)=P(A)/P(B)
-   self._sampled_targets:cdiv(self._sampled_targets:sum(2):add(0.00001):expandAs(self._sampled_targets))
+   self._sampled_targets:cdiv(self._sampled_targets:sum(2):add(0.000000001):expandAs(self._sampled_targets))
    -- keep within target upper and lower bounds
-   self._sampled_targets:mul(0.8):add(0.1)
+   --self._sampled_targets:mul(0.8):add(0.1)
    self._gater_targets:resizeAs(self._gater.ostate.act_double)
    -- non-sampled expert-examples will have zero error (target = act)
    if self._zero_targets then
-      self._gater_targets:fill(0.1)
+      self._gater_targets:fill(0)
    else
       self._gater_targets:copy(self._gater.ostate.act_double) 
    end

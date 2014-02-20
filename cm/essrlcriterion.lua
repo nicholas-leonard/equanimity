@@ -12,8 +12,8 @@ local ESSRLCriterion, parent = torch.class("nn.ESSRLCriterion")
 function ESSRLCriterion:__init(config)
    config = config or {}
    local args, n_sample, n_leaf, n_eval, n_classes, criterion, 
-      accumulator, sparsity_factor, antispec, max_main_class,
-      welfare_factor = xlua.unpack(
+      accumulator, sparsity_factor, antispec, max_main_class, 
+      welfare_factor, entropy_factor = xlua.unpack(
       {config},
       'ESSRLCriterion', nil,
       {arg='n_sample', type='number', 
@@ -34,7 +34,9 @@ function ESSRLCriterion:__init(config)
       {arg='max_main_class', type='number', default=0.5,
        help='maximum proportion of the main class in an expert'},
       {arg='welfare_factor', type='number', default=0, 
-       help='weight of the constraint on the maximum main class'}
+       help='weight of the constraint on the maximum main class'},
+      {arg='entropy_factor', type='number', default=0,
+       help='weight of the constraint on the per-expert class entropy'}
    )
    -- we expect the criterion to be stateless (we use it as a function)
    self._criterion = criterion
@@ -50,6 +52,8 @@ function ESSRLCriterion:__init(config)
    self._antispec = antispec
    self._max_main_class = max_main_class
    self._welfare_factor = welfare_factor
+   self._entropy_factor = entropy_factor
+   print(self._entropy_factor)
    -- statistics :
    ---- records distribution of backprops (train) or samples (eval)
    self._spec_matrix = torch.DoubleTensor(self._n_leaf, self._n_classes) 
@@ -62,11 +66,16 @@ function ESSRLCriterion:__init(config)
    self._backprop_weights = torch.DoubleTensor()
    self._gater_targets = torch.DoubleTensor()
    self._expert_errors = torch.DoubleTensor()
+   self._entropy = torch.DoubleTensor()
+   self._gater_grad = torch.DoubleTensor()
+   self._log_f_ey = torch.DoubleTensor()
 end
 
 function ESSRLCriterion:resetStatistics()
    self._spec_matrix:zero()
    self._err_matrix:zero()
+   self._mean_class_entropy = 0
+   self._sample_count = 0
 end
 
 function ESSRLCriterion:forward(expert_ostates, targets, indices)
@@ -76,6 +85,8 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
    local n_example = indices:size(1)
    self._backprop_weights:resize(n_example, self._n_leaf):zero()
    self._gater_targets:resize(n_example, self._n_leaf):zero()
+   self._entropy:resize(self._n_leaf, self._n_classes, n_example):zero()
+   self._gater_grad:resize(self._n_leaf, n_example):zero()
    local batch = {}
    --[[ group by example ]]--
    for expert_idx, expert_ostate in pairs(expert_ostates) do
@@ -103,22 +114,36 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
    end
    -- evaluate
    local output_error, outputs = self:_evaluate(batch, targets)
+   
    for example_idx, example in ipairs(batch) do
       local llh = torch.DoubleTensor(example.likelihoods)
       llh:div(llh:sum() + 0.00001)
+      local expert_indices = torch.LongTensor(example.experts)
       self._backprop_weights:select(1, example_idx):indexCopy(
-         1, torch.LongTensor(example.experts), llh
+         1, expert_indices, llh
+      )
+      -- fill entropy matrix
+      self._entropy[{{},targets[example_idx],example_idx}]:indexCopy(
+         1, expert_indices, self._input_alphas:select(1, example_idx)
       )
    end   
-   --[[ make backprop grads equanimous
-   for i = 1,3 do
-      self._backprop_weights:cdiv(self._backprop_weights:sum(2):add(0.00001):expandAs(self._backprop_weights))
-      if self._sparsity_factor > 0 then
-         --increases the sparsity of the distribution
-         self._backprop_weights:pow(self._sparsity_factor)
-      end
-      self._backprop_weights:cdiv(self._backprop_weights:sum(1):add(0.00001):expandAs(self._backprop_weights))
-   end--]]
+   
+   -- get per-expert class entropy
+   local f_ey = self._entropy:sum(3):resize(self._n_leaf, self._n_classes):add(0.000001)
+   self._log_f_ey:resizeAs(f_ey)
+   self._log_f_ey:copy(f_ey)
+   self._log_f_ey:log()
+   self._mean_class_entropy = self._mean_class_entropy + f_ey:cmul(self._log_f_ey):sum(2):mean()
+   self._sample_count = self._sample_count + 1
+   -- derivative of mean class entropy
+   self._log_f_ey:add(1)
+   for expert_idx = 1,self._n_leaf do
+      self._gater_grad:select(1,expert_idx):addmv(
+         self._entropy:select(1,expert_idx):t(), self._log_f_ey:select(1,expert_idx)
+      )
+   end 
+   self._gater_grad:mul(self._entropy_factor)
+   
    self._gater_targets:copy(self._backprop_weights)
    -- matrix probabilities of sampling leaf-expert given example
    --self._gater_targets:cdiv(self._gater_targets:sum(2):expandAs(self._gater_targets))
@@ -153,9 +178,11 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       --expert_ostate.grad:mul(expert_ostate.batch_indices:size(1))
       -- target probability distributions for gater(s) 
       local gater_targets = self._gater_targets:select(2, expert_idx):index(1, expert_ostate.batch_indices)
+      local gater_grads = self._gater_grad:select(1, expert_idx):index(1, expert_ostate.batch_indices)
       expert_cstates[expert_idx] = {
          batch_indices = expert_ostate.batch_indices,
-         gater_targets = gater_targets
+         gater_targets = gater_targets,
+         gater_grads = gater_grads
       }
       expert_ostate.grad = expert_ostate.grad:type(expert_ostate.act:type())
    end
@@ -255,7 +282,8 @@ end
 function ESSRLCriterion:report()
    local report = {
       spec = self._spec_matrix,
-      expert_error = self._err_matrix:cdiv(torch.add(self._spec_matrix,0.00001))
+      expert_error = self._err_matrix:cdiv(torch.add(self._spec_matrix,0.00001)),
+      mean_class_entropy = self._mean_class_entropy/(self._sample_count + 0.00001)
    }
    return report
 end

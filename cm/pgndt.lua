@@ -53,6 +53,7 @@ cmd:option('--outputLearnScale', 1, 'learning rate scale for the output layer')
 cmd:option('--gaterGradScale', 1, 'what to multiply gater grad by before adding it to grad sent to previous layer expert or trunk')
 cmd:option('--maxMainClass', 0.5, 'maximum proportion of the main class in an expert')
 cmd:option('--welfareFactor', 0, 'weight of the constraint on the maximum main class')
+cmd:option('--entropyFactor', 0, 'weight of the constraint on the per-expert class entropy')
 cmd:option('--progress', false, 'display progress bar')
 cmd:option('--nopg', false, 'dont use postgresql')
 cmd:option('--datasource', 'Mnist', 'datasource to use : Mnist | NotMnist | Cifar10')
@@ -131,6 +132,7 @@ local hp = {
    antispec = opt.antispec,
    max_main_class = opt.maxMainClass,
    welfare_factor = opt.welfareFactor,
+   entropy_factor = opt.entropyFactor,
    exclude_momentum = _.split(opt.excludeMomentum, ',')
 }
 

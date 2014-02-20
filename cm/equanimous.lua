@@ -110,9 +110,10 @@ function Equanimous:_backward(cstate)
    local grad = self._criterion:backward(
       self.ostate.act_double, self.ostate.gater_targets
    )
+   grad:add(self.ostate.gater_grads) --from class-entropy constraint
    grad = self._softmax:backward(
       self.ostate.pre_softmax, grad
-   )--:mul(self._temperature)
+   ):div(self._temperature)
    self.ostate.grad = grad:type(self.ostate.act:type())
    parent._backward(self, cstate)
 end

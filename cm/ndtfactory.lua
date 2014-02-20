@@ -147,7 +147,8 @@ function NDTFactory:buildOptimizer(opt)
          n_eval=opt.n_eval, accumulator=opt.accumulator,
          sparsity_factor=opt.sparsity_factor, antispec=opt.antispec,
          max_main_class=opt.max_main_class, 
-         welfare_factor=opt.welfare_factor
+         welfare_factor=opt.welfare_factor,
+         entropy_factor=opt.entropy_factor
       },
       visitor = self:buildVisitor(opt),
       feedback = dp.Confusion(),

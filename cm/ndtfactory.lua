@@ -27,7 +27,7 @@ function NDTFactory:buildGater(opt, layer_idx, input_size)
    for i = 1,opt.gater_dept[layer_idx]-1 do
       gater:add(
          dp.Neural{
-            input_size=input_size, output_size=gater_size,
+            input_size=g_input_size, output_size=gater_size,
             transfer=self:buildTransfer(opt.activation),
             dropout=self:buildDropout(opt.gater_dropout and 0.5),
             mvstate={learn_scale=gater_lrs}, tags={['gater']=true}
@@ -45,7 +45,8 @@ function NDTFactory:buildGater(opt, layer_idx, input_size)
          temperature_decay=opt.temperature_decay, 
          epsilon_decay=opt.epsilon_decay,
          n_eval=opt.n_eval, epsilon=opt.epsilon, tags={['gater']=true},
-         mvstate={learn_scale=gater_lrs}, eval_proto=opt.eval_proto
+         mvstate={learn_scale=gater_lrs}, eval_proto=opt.eval_proto,
+         entropy_factor=opt.entropy_factor
       }
    )
    return gater
@@ -147,8 +148,7 @@ function NDTFactory:buildOptimizer(opt)
          n_eval=opt.n_eval, accumulator=opt.accumulator,
          sparsity_factor=opt.sparsity_factor, antispec=opt.antispec,
          max_main_class=opt.max_main_class, 
-         welfare_factor=opt.welfare_factor,
-         entropy_factor=opt.entropy_factor
+         welfare_factor=opt.welfare_factor
       },
       visitor = self:buildVisitor(opt),
       feedback = dp.Confusion(),

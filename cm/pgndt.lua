@@ -77,7 +77,7 @@ end
 --[[ hyperparameters ]]--
 
 local hp = {
-   version = 7,
+   version = 9,
    progress = opt.progress,
    max_tries = opt.maxTries,
    max_epoch = opt.maxEpoch,

@@ -13,15 +13,13 @@ Equanimous.isEquanimous = true
 function Equanimous:__init(config)
    config = config or {}
    require 'nnx'
-   local args, n_sample, targets, transfer, epsilon, epsilon_decay,
-      temperature, temperature_decay, eval_proto, criterion
-      = xlua.unpack(
+   local args, n_sample, transfer, epsilon, epsilon_decay,
+      temperature, temperature_decay, eval_proto, criterion, n_classes,
+      entropy_factor = xlua.unpack(
       {config},
       'Equanimous', nil,
       {arg='n_sample', type='number', 
        help='number of experts sampled per example'},
-      {arg='targets', type='table', default={0.1,0.9},
-       help='targets used to diminish (first) and reinforce (last)'},
       {arg='transfer', type='nn.Module', default=nn.Identity(),
        help='a transfer function like nn.Tanh, nn.Sigmoid, nn.ReLU'},
       {arg='epsilon', type='number', default=0.1,
@@ -36,20 +34,25 @@ function Equanimous:__init(config)
        help='evaluation protocol : MAP, Stochastic Sampling, etc'},
       {arg='criterion', type='nn.Criterion', 
        default=nn.DistNLLCriterion{inputIsProbability=true},
-       help='Criterion to be used for optimizing winning experts'}
+       help='Criterion to be used for optimizing winning experts'},
+      {arg='n_classes', type='number', default=10,
+       help='number of classes'},
+      {arg='entropy_factor', type='number', default=0,
+       help='weight of the constraint on the per-expert class entropy'}
    )
    config.typename = config.typename or 'equanimous'
    config.transfer = transfer
    parent.__init(self, config)  
    self._n_sample = n_sample
-   self._targets = targets
    self._epsilon = epsilon
    self._temperature = temperature
    self._epsilon_decay = epsilon_decay
    self._temperature_decay = temperature_decay
+   self._entropy_factor = entropy_factor
    self._eval_proto = eval_proto
    self._criterion = criterion
    self._criterion.sizeAverage = false
+   self._n_classes = n_classes
    -- statistics : sparsity distribution of alphas
    local n_bin = 10
    self._alpha_bins = torch.range(1,n_bin):double():div(n_bin):storage():totable()
@@ -57,11 +60,46 @@ function Equanimous:__init(config)
    self:parameters().bias.param:zero()
    self:zeroStatistics()
    self._softmax = nn.SoftMax()
-end
-
-function Equanimous:setup(config)
-   parent.setup(self, config)
-end   
+   
+   -- mean class entropy criterion (input is entropy matrix E x Y x X)
+   local mce = nn.Sequential()
+   mce:add(nn.Sum(3))
+   mce:add(nn.SoftMax())
+   mce:add(nn.Replicate(2))
+   mce:add(nn.SplitTable(1))
+   local ce = nn.ParallelTable()
+   ce:add(nn.Identity())
+   local logs = nn.Sequential()
+   logs:add(nn.AddConstant(0.00001))
+   logs:add(nn.Log())
+   ce:add(logs)
+   mce:add(ce)
+   mce:add(nn.CMulTable())
+   mce:add(nn.Sum(2)) --over classes
+   mce:add(nn.Reshape(self._output_size,1)) --to prevent mean bug
+   mce:add(nn.Mean(1)) --over experts
+   self._mce = mce
+   
+   -- expert entropy (input is alpha matrix)
+   local ee = nn.Sequential()
+   ee:add(nn.Sum(1))
+   ee:add(nn.SoftMax())
+   ee:add(nn.Replicate(2))
+   ee:add(nn.SplitTable(1))
+   local ce = nn.ParallelTable()
+   ce:add(nn.Identity())
+   local logs = nn.Sequential()
+   logs:add(nn.AddConstant(0.00001))
+   logs:add(nn.Log())
+   ce:add(logs)
+   ee:add(ce)
+   ee:add(nn.CMulTable())
+   --ee:add(nn.Reshape(self._output_size,1)) --to prevent sum bug
+   ee:add(nn.Sum(1)) --over experts
+   self._ee = ee
+   
+   self._entropy = torch.DoubleTensor()
+end 
 
 function Equanimous:_forward(cstate)
    -- affine transform + transfer function
@@ -81,12 +119,6 @@ function Equanimous:_forward(cstate)
       self._alphas:add(self._alphas:mean(2):mul(self._epsilon):expandAs(self._alphas))
       self._alphas:cdiv(self._alphas:sum(2):add(0.000001):expandAs(self._alphas))
    end
-   --[[for i = 1,3 do
-      -- Equanimity : normalize each expert's alphas to sum to one 
-      self._alphas:cdiv(self._alphas:sum(1):expandAs(self._alphas))
-      -- normalize each example's alphas to sum to one
-      self._alphas:cdiv(self._alphas:sum(2):expandAs(self._alphas))
-   end--]]
    self.ostate.alphas = self._alphas
    -- sample experts from an example multinomial without replacement
    self.ostate.routes = dp.multinomial(self._alphas, self._n_sample, true)
@@ -104,16 +136,47 @@ end
 function Equanimous:_backward(cstate)
    self.ostate.act_double:add(0.00001)
    self.ostate.gater_targets:add(0.00001)
-   self._gater_error = self._gater_error + self._criterion:forward(
+   local nll = self._criterion:forward(
       self.ostate.act_double, self.ostate.gater_targets
    )
+   self._gater_error = self._gater_error + nll
    local grad = self._criterion:backward(
       self.ostate.act_double, self.ostate.gater_targets
    )
-   grad:add(self.ostate.gater_grads) --from class-entropy constraint
-   grad = self._softmax:backward(
-      self.ostate.pre_softmax, grad
-   ):div(self._temperature)
+   local n_example = self.ostate.act_double:size(1)
+   
+   --[[ mean class entropy constraint ]]--
+   self._entropy:resize(self._output_size, self._n_classes, n_example):zero()
+   for example_idx = 1,n_example do
+      -- fill entropy matrix
+      self._entropy[{{},self.ostate.class_targets[example_idx],example_idx}]:copy(
+         self.ostate.act_double:select(1, example_idx)
+      )
+   end
+   -- measure MCE
+   local mce = - self._mce:forward(self._entropy)[1]
+   self._mean_class_entropy = self._mean_class_entropy + mce
+   -- gradients wrt entropy matrix
+   local grad_mce = self._mce:backward(self._entropy, torch.DoubleTensor({self._entropy_factor}))
+   for example_idx = 1,n_example do
+      -- empty entropy matrix
+      grad:select(1,example_idx):add(
+         self._entropy[{{},self.ostate.class_targets[example_idx],example_idx}]
+      )
+   end
+   
+   --[[ expert entropy constraint ]]--
+   -- measure EE
+   local ee = - self._ee:forward(self.ostate.act_double)
+   self._expert_entropy = self._expert_entropy + ee
+   -- gradients wrt softmax
+   local grad_ee = self._ee:backward(
+      self.ostate.act_double, torch.DoubleTensor({self._entropy_factor})
+   )
+   --print(torch.abs(grad):sum(), nll, torch.abs(grad_mce):sum(), mce, torch.abs(grad_ee):sum(), ee)
+   grad:add(grad_ee)
+   
+   grad = self._softmax:backward(self.ostate.pre_softmax, grad):div(self._temperature)
    self.ostate.grad = grad:type(self.ostate.act:type())
    parent._backward(self, cstate)
 end
@@ -192,12 +255,14 @@ function Equanimous:report()
    local report = parent.report(self)
    local dist_report = dp.distReport(self._alpha_dist)
    local gater_error = self._gater_error/(self._sample_count+0.00001)
-   print(self:id():toString()..':loss', gater_error, self._sample_count)
+   local mce = self._mean_class_entropy/(self._sample_count+0.00001)
+   local ee = self._expert_entropy/(self._sample_count+0.00001)
+   print(self:id():toString()..':loss', gater_error, mce, self._sample_count)
    return table.merge(
       report, {
          alpha=dist_report, n_sample=self._sample_count, 
          loss=gater_error, epsilon=self._epsilon,
-         temperature=self._temperature
+         temperature=self._temperature, mce=mce, ee=ee
       }
    )
 end
@@ -209,6 +274,8 @@ function Equanimous:zeroStatistics()
    end
    self._sample_count = 0
    self._gater_error = 0
+   self._mean_class_entropy = 0
+   self._expert_entropy = 0
 end
 
 function Equanimous:doneEpoch(report)

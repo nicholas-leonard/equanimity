@@ -31,7 +31,7 @@ function SwitchNode:__init(config)
    self._sampled_targets = torch.DoubleTensor()
    self._gater_targets = torch.DoubleTensor()
    self._expert_grad = torch.DoubleTensor()
-   self._gater_grads = torch.DoubleTensor()
+   self._class_targets = torch.DoubleTensor()
 end
 
 function SwitchNode:setup(config)
@@ -136,7 +136,7 @@ end
 function SwitchNode:_backward(cstates)
    local istate = {}
    self._sampled_targets:resize(self._gater.ostate.act_double:size()):zero()
-   self._gater_grads:resize(self._gater.ostate.act_double:size()):zero()
+   self._class_targets:resize(self._gater.ostate.act_double:size(1)):zero()
    self.istate.act_double = self.istate.act_double or self.istate.act:double()
    local n_example = self.istate.act_double:size(1)
    if not self._input_grad then
@@ -154,8 +154,8 @@ function SwitchNode:_backward(cstates)
       self._sampled_targets:select(2,expert_idx):indexCopy(
          1, expert_indices, expert_cstate.gater_targets
       )
-      self._gater_grads:select(2,expert_idx):indexCopy(
-         1, expert_indices, expert_cstate.gater_grads
+      self._class_targets:indexCopy(
+         1, expert_indices, expert_cstate.class_targets
       )
       local expert_istate = expert_branch:backward{
          output=expert_ostate, global=self.global, carry=expert_cstate
@@ -179,9 +179,7 @@ function SwitchNode:_backward(cstates)
    else
       self._gater_targets:copy(self._gater.ostate.act_double) 
    end
-   -- entropy-based gradients (to maximize class entropy)
-   self._gater_grads:cdiv(self._gater.ostate.act_double:add(0.000001))
-   self._gater.ostate.gater_grads = self._gater_grads
+   self._gater.ostate.class_targets = self._class_targets
    for expert_idx, expert_cstate in pairs(cstates) do
       -- insert sampled (non-zero) p(E_l|E_l-1,X) targets into respective slots
       local expert_indices = self._experts[expert_idx].ostate.expert_indices
@@ -198,7 +196,7 @@ function SwitchNode:_backward(cstates)
    local cstate = {
       batch_indices = self.istate.batch_indices,
       gater_targets = parent_gater_targets:reshape(parent_gater_targets:size(1)),
-      gater_grads = self._gater_grads:sum(2):resize(self._gater_grads:size(1))
+      class_targets = self._class_targets
    }
    return cstate
 end

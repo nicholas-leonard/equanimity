@@ -12,8 +12,7 @@ local ESSRLCriterion, parent = torch.class("nn.ESSRLCriterion")
 function ESSRLCriterion:__init(config)
    config = config or {}
    local args, n_sample, n_leaf, n_eval, n_classes, criterion, 
-      accumulator, sparsity_factor, antispec, max_main_class, 
-      welfare_factor = xlua.unpack(
+      accumulator = xlua.unpack(
       {config},
       'ESSRLCriterion', nil,
       {arg='n_sample', type='number', 
@@ -26,15 +25,7 @@ function ESSRLCriterion:__init(config)
        help='number of classes'},
       {arg='criterion', type='nn.Criterion', default=nn.ClassNLLCriterion(),
        help='Criterion to be used for optimizing winning experts'},
-      {arg='accumulator', type='string', default='softmax'},
-      {arg='sparsity_factor', type='number', default=-1,
-       help='increases the sparsity of the equanimous distributions'},
-      {arg='antispec', type='boolean', default=false,
-       help='backprop through worst examples in each expert'},
-      {arg='max_main_class', type='number', default=0.5,
-       help='maximum proportion of the main class in an expert'},
-      {arg='welfare_factor', type='number', default=0, 
-       help='weight of the constraint on the maximum main class'}
+      {arg='accumulator', type='string', default='softmax'}
    )
    -- we expect the criterion to be stateless (we use it as a function)
    self._criterion = criterion
@@ -46,10 +37,6 @@ function ESSRLCriterion:__init(config)
    self._n_eval = n_eval
    self._n_classes = n_classes
    self._accumulator = accumulator
-   self._sparsity_factor = sparsity_factor
-   self._antispec = antispec
-   self._max_main_class = max_main_class
-   self._welfare_factor = welfare_factor
    -- statistics :
    ---- records distribution of backprops (train) or samples (eval)
    self._spec_matrix = torch.DoubleTensor(self._n_leaf, self._n_classes) 
@@ -128,23 +115,9 @@ function ESSRLCriterion:forward(expert_ostates, targets, indices)
       local gradOutput = self._criterion:backward(
          log_softmax, targets:index(1, expert_ostate.batch_indices)
       ):clone()
-      if self._welfare_factor > 0 then
-         --penalize the main class of each expert
-         local val, idx = torch.log(expert_ostate.act_double):mean(1)[1]:max(1)
-         if val[1] > math.log(self._max_main_class) then
-            gradOutput:add(
-               -self._welfare_factor, self._criterion:backward(
-                  log_softmax, idx:expand(log_softmax:size(1))
-               ):clone()
-            )    
-         end
-      end
       expert_ostate.grad = self._log:backward(expert_ostate.act_double, gradOutput):clone()
       -- weigh gradients by the equanimous distribution of reverse error
       local backprop_weights = self._backprop_weights:select(2, expert_idx):index(1, expert_ostate.batch_indices)
-      if self._antispec then
-         backprop_weights = dp.reverseDist(backprop_weights)
-      end
       expert_ostate.grad:cmul(backprop_weights:reshape(backprop_weights:size(1), 1):expandAs(expert_ostate.grad))
       -- scale weights to full batch of examples
       --expert_ostate.grad:mul(expert_ostate.batch_indices:size(1))
@@ -258,6 +231,5 @@ function ESSRLCriterion:report()
       expert_error = self._err_matrix:cdiv(torch.add(self._spec_matrix,0.00001)),
       expert_loss = expert_loss
    }
-   print('expert_loss', expert_loss)
    return report
 end

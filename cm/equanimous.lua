@@ -94,7 +94,6 @@ function Equanimous:__init(config)
    ce:add(logs)
    ee:add(ce)
    ee:add(nn.CMulTable())
-   --ee:add(nn.Reshape(self._output_size,1)) --to prevent sum bug
    ee:add(nn.Sum(1)) --over experts
    self._ee = ee
    
@@ -112,7 +111,6 @@ function Equanimous:_forward(cstate)
       self._alphas = self.ostate.act_double:clone()
    end
    self._alphas:resize(self.ostate.act:size())
-   --self._alphas:copy(self.ostate.act):add(-self._targets[1])
    self._alphas:copy(self.ostate.act_double)
    -- high epsilon = exploration
    if self._epsilon > 0 then
@@ -122,15 +120,7 @@ function Equanimous:_forward(cstate)
    self.ostate.alphas = self._alphas
    -- sample experts from an example multinomial without replacement
    self.ostate.routes = dp.multinomial(self._alphas, self._n_sample, true)
-   -- gather stats
-   local previous = 0
-   local alphas = self._alphas
-   for i,upper in ipairs(self._alpha_bins) do
-      local current = torch.le(alphas,upper):double():sum()
-      self._alpha_dist[i] = self._alpha_dist[i] + current - previous
-      previous = current
-   end
-   self._sample_count = self._sample_count + alphas:size(1)
+   self._sample_count = self._sample_count + self._alphas:size(1)
 end
 
 function Equanimous:_backward(cstate)

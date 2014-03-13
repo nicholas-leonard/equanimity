@@ -10,12 +10,12 @@ function Conditioner:propagateBatch(batch, report)
    local batch_indices = torch.range(1,batch:nSample()):long()
    
    local ostates = model:forward{
-      input=batch:inputs(), carry={batch_indices=batch_indices}
+      input=batch:inputs(), carry={
+         batch_indices=batch_indices,dataset_indices=batch:indices()
+      }
    }
    
-   local loss, outputs, istates, cstates = self._criterion:forward(
-      ostates, batch:targets(), batch_indices
-   )
+   local loss, outputs, istates, cstates = self._criterion:forward(ostates, batch:targets(), batch_indices)
    
    batch:setLoss(loss)  
    batch:setOutputs(outputs)
@@ -27,20 +27,16 @@ function Conditioner:propagateBatch(batch, report)
       self._feedback:add(batch)
    end
    --publish report for this optimizer
-   self._mediator:publish(self:id():name() .. ':' .. "doneFeedback", 
-                          report, batch)
+   self._mediator:publish(self:id():name() .. ':' .. "doneFeedback", report, batch)
 
-   model:backward{
-      output=istates, carry=cstates, global={scale=1/batch:nSample()}
-   }
+   model:backward{output=istates, carry=cstates, global={scale=1/batch:nSample()}}
    
    --[[ update parameters ]]--
    model:accept(self._visitor)
    model:doneBatch()
    
    --publish report for this optimizer
-   self._mediator:publish(self:id():name() .. ':' .. "doneBatch", 
-                          report, batch)
+   self._mediator:publish(self:id():name() .. ':' .. "doneBatch", report, batch)
                           
 end
 

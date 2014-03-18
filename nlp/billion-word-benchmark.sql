@@ -3,25 +3,45 @@ CREATE SCHEMA bw; --one Billion-Word benchmark
 --todo : train, valid, test
 
 -- first parse
-CREATE SEQUENCE bw.word_id_seq MINVALUE 1;
+CREATE SEQUENCE bw.word_id_seq2 MINVALUE 1;
 CREATE TABLE bw.word_count (
-	word_id		INT4 DEFAULT nextval('bw.word_id_seq'),
+	word_id		INT4 DEFAULT nextval('bw.word_id_seq2'),
 	word_str	VARCHAR,
 	word_count	INT4,
 	PRIMARY KEY(word_id),
 	UNIQUE (word_str)
 );
 
+INSERT INTO bw.word_count (word_str, word_count) VALUES ('<S>', 30301028), ('</S>', 30301028);
+
+
 -- second parse
+--DROP SEQUENCE bw.word_pos_seq CASCADE; DROP TABLE bw.sentence_word;
 CREATE SEQUENCE bw.word_pos_seq MINVALUE 1;
-CREATE TABLE bw.sentence_words (
+CREATE TABLE bw.train_sentence (
 	word_pos	INT4 DEFAULT nextval('bw.word_pos_seq'),
 	sentence_id	INT4,
 	word_id		INT4,
 	PRIMARY KEY (word_pos)
 );
-CREATE INDEX sentence_words_sentence_id ON bw.sentence_words (sentence_id);
-CREATE INDEX sentence_words_word_id ON bw.sentence_words (word_id);
+CREATE TABLE bw.valid_sentence (
+	word_pos	INT4 DEFAULT nextval('bw.word_pos_seq'),
+	sentence_id	INT4,
+	word_id		INT4,
+	PRIMARY KEY (word_pos)
+);
+CREATE TABLE bw.test_sentence (
+	word_pos	INT4 DEFAULT nextval('bw.word_pos_seq'),
+	sentence_id	INT4,
+	word_id		INT4,
+	PRIMARY KEY (word_pos)
+);
+
+CREATE INDEX train_sentence_id ON bw.train_sentence (sentence_id);
+CREATE INDEX train_word_id ON bw.train_sentence (word_id);
+
+INSERT INTO bw.sentence_word (sentence_id, word_id) (SELECT 0, unnest(ARRAY[100,200,300]::INT4[])) 
+SELECT * FRoM bw.sentence_word;
 
 --Requirements
 -- 1. Select batch of examples by word_pos for n context words

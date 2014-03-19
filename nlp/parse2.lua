@@ -38,8 +38,8 @@ function parse()
             line_i = line_i + 1
             local query = string.format(
                "INSERT INTO bw." .. opt.set .. "_sentence " ..
-               "(sentence_id, word_id) " ..
-               "(SELECT %d, unnest(ARRAY[%s]::INT4[]));", 
+               "(sentence_id, sentence_words) " ..
+               "(SELECT %d, ARRAY[%s]::INT4[]);", 
                line_i, _.join(sentence, ", ")
             )
             table.insert(queries, query)

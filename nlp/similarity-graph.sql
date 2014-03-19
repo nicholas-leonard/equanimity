@@ -40,6 +40,32 @@ FROM bw.word_idf AS b
 WHERE a.word_id = b.word_id--24607658 rows affected
 
 
+--optimize
+CREATE TABLE bw.sentence_bag_s (
+	sentence_id	INT4,
+	word_id		INT4,
+	word_freq	FLOAT8
+);
+INSERT INTO bw.sentence_bag_s (sentence_id, word_id, word_freq) (
+	SELECT sentence_id, word_id, word_freq
+	FROM bw.sentence_bag
+	ORDER BY sentence_id ASC
+);
+CREATE INDEX sentence_bag_s_idx ON bw.sentence_bag_s (sentence_id);
+
+CREATE TABLE bw.sentence_bag_w (
+	sentence_id	INT4,
+	word_id		INT4,
+	word_freq	FLOAT8
+);
+INSERT INTO bw.sentence_bag_w (sentence_id, word_id, word_freq) (
+	SELECT sentence_id, word_id, word_freq
+	FROM bw.sentence_bag
+	ORDER BY word_id ASC
+);
+CREATE INDEX sentence_bag_w_idx ON bw.sentence_bag_w (word_id);
+
+DROP TABLE bw.sentence_bag;
 
 --DROP TABLE bw.sentence_similarity;
 CREATE TABLE bw.sentence_similarity (
@@ -57,7 +83,7 @@ INSERT INTO bw.sentence_similarity (tail, head, similarity) (
                 /(
                 (
                 SELECT sqrt(SUM(power(word_freq,2)))::FLOAT8 AS norm
-                FROM bw.sentence_bag AS c
+                FROM bw.sentence_bag_s AS c
                 WHERE c.sentence_id = a.sentence_id
                 )
                 *
@@ -66,8 +92,8 @@ INSERT INTO bw.sentence_similarity (tail, head, similarity) (
         FROM    (
                 SELECT sentence_id, dot_product
                 FROM    (
-                        SELECT b.sentence_id, SUM(a.word_freq::INT8*b.word_freq)::FLOAT8 AS dot_product
-                        FROM bw.sentence_bag AS a, bw.sentence_bag AS b
+                        SELECT b.sentence_id, SUM(a.word_freq*b.word_freq)::FLOAT8 AS dot_product
+                        FROM bw.sentence_bag_s AS a, bw.sentence_bag_w AS b
                         WHERE a.sentence_id = 1 AND a.word_id = b.word_id 
                         GROUP BY b.sentence_id
                         ) AS a
@@ -75,12 +101,14 @@ INSERT INTO bw.sentence_similarity (tail, head, similarity) (
                 ) AS a,
                 (
                 SELECT sqrt(SUM(power(word_freq,2)))::FLOAT8 AS norm
-                FROM bw.sentence_bag
+                FROM bw.sentence_bag_s
                 WHERE sentence_id = 1
                 ) AS b
         ORDER BY similarity DESC
-        LIMIT 1000
+        LIMIT 100
 );
 $$ LANGUAGE 'SQL';
 
-python ../Utils/pql.py "SELECT DISTINCT sentence_id FROM bw.sentence_bag" "SELECT bw.build_sentence_similarity_graph (%s);" 8
+SELECT 
+
+python parallel_sql.py "SELECT DISTINCT sentence_id FROM bw.sentence_bag" "SELECT bw.build_sentence_similarity_graph (%s);" 8

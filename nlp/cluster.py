@@ -1,4 +1,4 @@
-__author__="Nicholas Léonard"
+__author__="Nicholas Leonard"
 __date__ ="$Oct 20, 2010 9:35:05 PM$"
 
 import sys, time, random
@@ -71,7 +71,7 @@ class System(InvisibleHand, DatabaseHandler):
 		self.executeSQL('''
         CREATE OR REPLACE FUNCTION public.measure_density_for_transfer(affected_item INT4, transfered_item INT4)
             RETURNS FLOAT8 AS $$
-        SELECT GREATEST(SUM(tanimoto), 0.000001) AS sum
+        SELECT GREATEST(SUM(similarity), 0.000001) AS sum
 		FROM 	(
 			SELECT cluster_key
 			FROM public.itemclusters
@@ -295,7 +295,7 @@ class ClusteringWorker(IndependentWorker, DatabaseHandler):
         mostInfluentialClusters = self.executeSQL('''
         SELECT cluster_key
         FROM(
-            SELECT cluster_key, SUM(similarity*density) AS sd_pull, SUM(tanimoto) AS potentialself_density
+            SELECT cluster_key, SUM(similarity*density) AS sd_pull, SUM(similarity) AS potentialself_density
             FROM public.itemclusters, %s
             WHERE %s = tail AND head = item_key
             GROUP BY cluster_key

@@ -1,4 +1,4 @@
-__author__="Nicholas Léonard"
+__author__="Nicholas Leonard"
 __date__ ="$Oct 20, 2010 9:35:05 PM$"
 
 import sys, time

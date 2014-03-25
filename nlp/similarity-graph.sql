@@ -238,7 +238,7 @@ CREATE TABLE bw.cluster5_similarity (
 --http://en.wikipedia.org/wiki/Cosine_similarity
 CREATE OR REPLACE FUNCTION bw.build_cluster5_similarity_graph ( cluster_key INT4 ) RETURNS VOID AS $$
 INSERT INTO bw.cluster5_similarity (tail, head, similarity) (
-        SELECT  1,
+        SELECT  $1,
                 cluster_key,
                 dot_product
                 /(
@@ -255,15 +255,15 @@ INSERT INTO bw.cluster5_similarity (tail, head, similarity) (
                 FROM    (
                         SELECT b.cluster_key, SUM(a.word_freq*b.word_freq)::FLOAT8 AS dot_product
                         FROM bw.c4_sentence_bag AS a, bw.c4_sentence_bag_w AS b
-                        WHERE a.cluster_key = 1 AND a.word_id = b.word_id 
+                        WHERE a.cluster_key = $1 AND a.word_id = b.word_id 
                         GROUP BY b.cluster_key
                         ) AS a
-                WHERE cluster_key != 1
+                WHERE cluster_key != $1
                 ) AS a,
                 (
                 SELECT sqrt(SUM(power(word_freq,2)))::FLOAT8 AS norm
                 FROM bw.c4_sentence_bag
-                WHERE cluster_key = 1
+                WHERE cluster_key = $1
                 ) AS b
         ORDER BY similarity DESC
         LIMIT 300
@@ -274,7 +274,7 @@ python parallel_sql.py "SELECT DISTINCT cluster_key FROM bw.cluster5" "SELECT bw
 
 CREATE INDEX cluster5_similarity_tail ON bw.cluster5_similarity (tail);
 
-
+--DROP TABLE public.itemclusters;
 CREATE TABLE public.itemclusters (
 	item_key	INT4,
 	cluster_key	INT4,
@@ -311,7 +311,7 @@ FROM    (
 	GROUP BY cluster_key
 	ORDER BY sum DESC
 	) AS foo
-WHERE sum > 15
+WHERE sum > 20
 ; $$ LANGUAGE 'SQL';
 
 SELECT * FROM public.get_clustering_statistics()

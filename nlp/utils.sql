@@ -25,7 +25,7 @@ FROM	(
 	) AS a
 ORDER BY a.sum DESC, a.cluster_key ASC, a.density DESC
 
-SELECT now(), MIN(density), MAX(density), AVG(density), SUM(density) FROM public.itemclusters
+SELECT now(), MIN(density), MAX(density), AVG(density), SUM(density) FROM public.itemclusters;
 /*
             now(),          MIN(density), MAX(density),   AVG(density),   SUM(density)
 "2014-03-20 23:54:59.710361-04";1e-16;1.16278526970974;0.163805230469986;181959.272747284
@@ -42,6 +42,16 @@ SELECT now(), MIN(density), MAX(density), AVG(density), SUM(density) FROM public
 "2014-03-23 01:48:27.084485-04";1e-16;7.41260336775986;1.57696802496858;1751738.66027178
 "2014-03-23 22:20:20.626472-04";1e-16;8.35835535598301;1.6673916074904;1852183.61717374
 "2014-03-23 22:37:31.333598-04";1e-16;8.35835535598301;1.66839341894663;1853296.45638823
+
+words
+"2014-03-28 16:05:33.170579-04";1e-16;1;0.00134632532831147;1055.03303395267
+"2014-03-28 16:13:38.606203-04";1e-16;1;0.017996500020248;14102.7592793671
+"2014-03-29 11:22:31.372434-04";1e-16;8.47072033622108;0.92217552845428;722652.708942383
+"2014-03-29 12:16:59.851281-04";1e-16;8.61556075006084;0.979858443499282;767855.290805334
+"2014-03-29 17:55:04.052022-04";1e-16;8.83678667885449;1.20447788413099;943875.844642522
+"2014-03-31 13:27:38.864168-04";1e-16;9;1.70038336885958;1,332,486.72278975
+"2014-04-01 16:09:32.944039-04";1e-16;9;1.75897439637015;1,378,400.93699711
+"2014-04-02 14:05:55.100312-04";1e-16;9;1.78401311106235;1,398,022.25033979
 */
 
 SELECT a.cluster_key, s_str, count
@@ -116,5 +126,261 @@ FROM	(
 		GROUP BY cluster_key
 		) AS a
 	) AS a
-WHERE row_number % 1000 = 0
+WHERE row_number % 10 = 0
 ORDER BY sum DESC
+
+-- cluster 4
+
+SELECT a.cluster_key, s_str, count
+FROM	(
+	SELECT a.cluster_key, a.sum, b.word_str AS s_str, count
+	FROM	(
+		SELECT a.cluster_key, a.sum, word_id, COUNT(*)
+		FROM	(
+			SELECT a.cluster_key, SUM(a.density)
+			FROM public.itemclusters AS a
+			GROUP BY a.cluster_key
+			ORDER BY sum DESC 
+			--OFFSET 10000 
+			LIMIT 100
+			) AS a, public.itemclusters AS b, bw.sentence_bag_s AS c, bw.cluster5 AS d
+		WHERE b.cluster_key = a.cluster_key AND b.item_key = d.cluster_key AND c.sentence_id = d.item_key 
+		GROUP BY a.cluster_key, a.sum, word_id
+		ORDER BY count DESC
+		) AS a, bw.word_count AS b
+	WHERE a.word_id = b.word_id AND a.count > 2
+	) AS a
+ORDER BY a.sum DESC, a.cluster_key ASC, a.count DESC
+
+SELECT a.cluster_key, s_str, count
+FROM	(
+	SELECT a.cluster_key, a.sum, b.word_str AS s_str, count
+	FROM	(
+		SELECT a.cluster_key, a.sum, word_id, COUNT(*)
+		FROM	(
+			SELECT a.cluster_key, SUM(a.density)
+			FROM bw.cluster4  AS a
+			WHERE cluster_key = 4264
+			GROUP BY a.cluster_key
+			) AS a, bw.cluster4 AS b, bw.sentence_bag_s AS c, bw.cluster5 AS d
+		WHERE b.cluster_key = a.cluster_key AND b.item_key = d.cluster_key AND c.sentence_id = d.item_key 
+		GROUP BY a.cluster_key, a.sum, word_id
+		ORDER BY count DESC
+		) AS a, bw.word_count AS b
+	WHERE a.word_id = b.word_id AND a.count > 2
+	) AS a
+ORDER BY a.sum DESC, a.cluster_key ASC, a.count DESC;
+
+
+-- cluster 3
+
+SELECT a.cluster_key, s_str, count
+FROM	(
+	SELECT a.cluster_key, a.sum, b.word_str AS s_str, count
+	FROM	(
+		SELECT a.cluster_key, a.sum, word_id, COUNT(*)
+		FROM	(
+			SELECT a.cluster_key, SUM(a.density)
+			FROM bw.cluster3 AS a
+			GROUP BY a.cluster_key
+			ORDER BY sum DESC 
+			--OFFSET 10000 
+			LIMIT 100
+			) AS a, bw.cluster3 AS b, bw.sentence_bag_s AS c, bw.cluster5 AS d, bw.cluster4 AS e
+		WHERE b.cluster_key = a.cluster_key AND b.item_key = e.cluster_key 
+		AND e.item_key = d.cluster_key AND c.sentence_id = d.item_key 
+		GROUP BY a.cluster_key, a.sum, word_id
+		) AS a, bw.word_count AS b
+	WHERE a.word_id = b.word_id AND a.count > 30
+	) AS a
+ORDER BY a.sum DESC, a.cluster_key ASC, a.count DESC
+
+SELECT * FROM public.itemclusters WHERE cluster_key = 684 ORDER BY density DESC
+
+
+SELECT a.cluster_key, s_str, count
+FROM	(
+	SELECT a.cluster_key, a.sum, b.word_str AS s_str, count
+	FROM	(
+		SELECT a.cluster_key, a.sum, word_id, COUNT(*)
+		FROM	(
+			SELECT DISTINCT a.cluster_key, e.cluster_key AS cluster4_key, a.sum, word_id
+			FROM	(
+				SELECT a.cluster_key, SUM(a.density)
+				FROM public.itemclusters AS a
+				GROUP BY a.cluster_key
+				ORDER BY sum DESC 
+				--OFFSET 10000 
+				LIMIT 100
+				) AS a, public.itemclusters AS b, bw.sentence_bag_s AS c, bw.cluster5 AS d, bw.cluster4 AS e
+			WHERE b.cluster_key = a.cluster_key AND b.item_key = e.cluster_key 
+			AND e.item_key = d.cluster_key AND c.sentence_id = d.item_key 
+			) AS a
+		GROUP BY a.cluster_key, a.sum, word_id
+		) AS a, bw.word_count AS b
+	WHERE a.word_id = b.word_id AND a.count > 5
+	) AS a
+ORDER BY a.sum DESC, a.cluster_key ASC, a.count DESC;
+
+SELECT s_str, COUNT(*)
+FROM	(
+	SELECT a.cluster_key, a.sum, b.word_str AS s_str, count
+	FROM	(
+		SELECT a.cluster_key, a.sum, word_id, COUNT(*)
+		FROM	(
+			SELECT DISTINCT a.cluster_key, e.cluster_key AS cluster4_key, a.sum, word_id
+			FROM	(
+				SELECT a.cluster_key, SUM(a.density)
+				FROM public.itemclusters AS a
+				GROUP BY a.cluster_key
+				ORDER BY sum DESC 
+				--OFFSET 10000 
+				LIMIT 100
+				) AS a, public.itemclusters AS b, bw.sentence_bag_s AS c, bw.cluster5 AS d, bw.cluster4 AS e
+			WHERE b.cluster_key = a.cluster_key AND b.item_key = e.cluster_key 
+			AND e.item_key = d.cluster_key AND c.sentence_id = d.item_key 
+			) AS a
+		GROUP BY a.cluster_key, a.sum, word_id
+		) AS a, bw.word_count AS b
+	WHERE a.word_id = b.word_id AND a.count > 5
+	) AS a
+GROUP BY s_str
+ORDER BY count DESC;
+
+-- cluster 2
+
+SELECT a.cluster_key, s_str, count
+FROM	(
+	SELECT a.cluster_key, a.sum, b.word_str AS s_str, count
+	FROM	(
+		SELECT a.cluster_key, a.sum, word_id, COUNT(*)
+		FROM	(
+			SELECT a.cluster_key, SUM(a.density)
+			FROM bw.cluster2 AS a
+			GROUP BY a.cluster_key
+			ORDER BY sum DESC 
+			--OFFSET 10000 
+			LIMIT 10
+			) AS a, bw.cluster2 AS b, bw.sentence_bag_s AS c, bw.cluster5 AS d, bw.cluster4 AS e, bw.cluster3 AS f
+		WHERE b.cluster_key = a.cluster_key AND b.item_key = f.cluster_key AND f.item_key = e.cluster_key
+		AND e.item_key = d.cluster_key AND c.sentence_id = d.item_key 
+		GROUP BY a.cluster_key, a.sum, word_id
+		) AS a, bw.word_count AS b
+	WHERE a.word_id = b.word_id AND a.count > 30
+	) AS a
+ORDER BY a.sum DESC, a.cluster_key ASC, a.count DESC
+
+-- cluster 1
+
+SELECT a.cluster_key, s_str, count
+FROM	(
+	SELECT a.cluster_key, a.sum, b.word_str AS s_str, count
+	FROM	(
+		SELECT a.cluster_key, a.sum, word_id, COUNT(*)
+		FROM	(
+			SELECT a.cluster_key, SUM(a.density)
+			FROM bw.cluster1 AS a
+			GROUP BY a.cluster_key
+			ORDER BY sum DESC 
+			--OFFSET 10000 
+			LIMIT 10
+			) AS a, bw.cluster1 AS b, bw.sentence_bag_s AS c, bw.cluster5 AS d, bw.cluster4 AS e, bw.cluster3 AS f, bw.cluster2 AS g
+		WHERE b.cluster_key = a.cluster_key AND b.item_key = g.cluster_key AND g.item_key = f.cluster_key 
+		AND f.item_key = e.cluster_key AND e.item_key = d.cluster_key AND c.sentence_id = d.item_key 
+		GROUP BY a.cluster_key, a.sum, word_id
+		) AS a, bw.word_count AS b
+	WHERE a.word_id = b.word_id AND a.count > 300
+	) AS a
+ORDER BY a.sum DESC, a.cluster_key ASC, a.count DESC;
+
+--word cluster5
+
+SELECT a.cluster_key, a.sum, b.word_str AS s_str, density
+FROM	(
+	SELECT a.cluster_key, a.sum, b.item_key, b.density
+	FROM	(
+		SELECT a.cluster_key, SUM(a.density)
+		FROM public.itemclusters AS a
+		GROUP BY a.cluster_key
+		ORDER BY sum DESC 
+		OFFSET 10000 
+		LIMIT 100
+		) AS a, public.itemclusters AS b
+	WHERE b.cluster_key = a.cluster_key
+	) AS a, bw.word_count AS b
+WHERE a.item_key = b.word_id
+ORDER BY a.sum DESC, a.cluster_key ASC, a.density DESC
+
+--word cluster4
+
+SELECT a.cluster_key, a.sum, b.word_str AS s_str, a.density*c.density AS density
+FROM	(
+	SELECT a.cluster_key, a.sum, b.item_key, b.density
+	FROM	(
+		SELECT a.cluster_key, SUM(a.density)
+		FROM bw.word_cluster4 AS a
+		GROUP BY a.cluster_key
+		ORDER BY sum DESC 
+		--OFFSET 10000 
+		LIMIT 100
+		) AS a, bw.word_cluster4 AS b
+	WHERE b.cluster_key = a.cluster_key
+	) AS a, bw.word_count AS b, bw.word_cluster5 AS c
+WHERE a.item_key = c.cluster_key AND c.item_key = b.word_id
+ORDER BY a.sum DESC, a.cluster_key ASC, a.density*c.density DESC
+
+--word cluster3
+
+SELECT a.cluster_key, a.sum, b.word_str AS s_str, a.density*c.density*d.density AS density
+FROM	(
+	SELECT a.cluster_key, a.sum, b.item_key, b.density
+	FROM	(
+		SELECT a.cluster_key, SUM(a.density)
+		FROM bw.word_cluster3 AS a
+		GROUP BY a.cluster_key
+		ORDER BY sum DESC 
+		--OFFSET 10000 
+		LIMIT 100
+		) AS a, bw.word_cluster3 AS b
+	WHERE b.cluster_key = a.cluster_key
+	) AS a, bw.word_count AS b, bw.word_cluster5 AS c, bw.word_cluster4 AS d
+WHERE c.item_key = b.word_id AND a.item_key = d.cluster_key AND d.item_key = c.cluster_key 
+ORDER BY a.sum DESC, a.cluster_key ASC, a.density*c.density*d.density DESC
+
+--word cluster2
+
+SELECT a.cluster_key, a.sum, b.word_str AS s_str, a.density*c.density*d.density*e.density AS density
+FROM	(
+	SELECT a.cluster_key, a.sum, b.item_key, b.density
+	FROM	(
+		SELECT a.cluster_key, SUM(a.density)
+		FROM bw.word_cluster2 AS a
+		GROUP BY a.cluster_key
+		ORDER BY sum DESC 
+		--OFFSET 10000 
+		LIMIT 10
+		) AS a, bw.word_cluster2 AS b
+	WHERE b.cluster_key = a.cluster_key
+	) AS a, bw.word_count AS b, bw.word_cluster5 AS c, bw.word_cluster4 AS d, bw.word_cluster3 AS e
+WHERE c.item_key = b.word_id AND a.item_key = e.cluster_key AND e.item_key = d.cluster_key 
+AND d.item_key = c.cluster_key AND  a.density*c.density*d.density*e.density > 3500
+ORDER BY a.sum DESC, a.cluster_key ASC, a.density*c.density*d.density*e.density DESC
+
+--word cluster1
+
+SELECT a.cluster_key, a.sum, b.word_str AS s_str, a.density*c.density*d.density*e.density*f.density AS density
+FROM	(
+	SELECT a.cluster_key, a.sum, b.item_key, b.density
+	FROM	(
+		SELECT a.cluster_key, SUM(a.density)
+		FROM bw.word_cluster1 AS a
+		GROUP BY a.cluster_key
+		ORDER BY sum DESC 
+		--OFFSET 10000 
+		LIMIT 10
+		) AS a, bw.word_cluster1 AS b
+	WHERE b.cluster_key = a.cluster_key
+	) AS a, bw.word_count AS b, bw.word_cluster5 AS c, bw.word_cluster4 AS d, bw.word_cluster3 AS e, bw.word_cluster2 AS f
+WHERE c.item_key = b.word_id AND a.item_key = f.cluster_key AND f.item_key = e.cluster_key AND e.item_key = d.cluster_key 
+AND d.item_key = c.cluster_key AND  a.density*c.density*d.density*e.density*f.density > 3500
+ORDER BY a.sum DESC, a.cluster_key ASC, a.density*c.density*d.density*e.density*f.density DESC

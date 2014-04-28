@@ -23,11 +23,12 @@ local n_word = tonumber(
    )[1]
 )
 
+local data = torch.IntTensor(n_word, 3)
 --sequence of words where sentences are delimited by <s/>
-local corpus = torch.IntTensor(n_word)
+local corpus = data:select(2, 3)
 --variable length n-grams where length <= n 
 --and tensor holds start and end indices of ngram in corpus
-local ngrams = torch.IntTensor(n_word, 2)
+local ngrams = data:narrow(2, 1, 2)
 
 -- contenxt_size of n-gram (i.e.: n-1)
 local context_size = opt.contextSize
@@ -76,5 +77,4 @@ print("\nloaded " .. n_sentence .. " sentences in " .. os.time()-start_time .. "
 
 local data_path = paths.concat(dp.DATA_DIR, 'billion-words')
 check_and_mkdir(data_path)
-torch.save(paths.concat(data_path, opt.dataset..'_corpus.th7'), corpus)
-torch.save(paths.concat(data_path, opt.dataset..'_ngrams.th7'), ngrams)
+torch.save(paths.concat(data_path, opt.dataset..'_data.th7'), data)

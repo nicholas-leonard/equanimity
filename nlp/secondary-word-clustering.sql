@@ -51,66 +51,79 @@ SELECT now(), MIN(density), MAX(density), AVG(density), SUM(density) FROM public
 "2014-04-10 01:41:18.213963-04";1e-16;2.24469519624583;0.260408305435386;204062.979163415
 "2014-04-10 12:21:26.626992-04";1e-16;6.86948064390496;0.678296509956417;531531.459207617
 "2014-04-10 15:43:24.634704-04";1e-16;8.47984544231353;0.735453834469036;576321.481943467
+"2014-04-10 20:22:16.102876-04";1e-16;8.61709107340828;0.910020993421114;713117.021011607
+"2014-04-11 01:00:07.899902-04";1e-16;8.61709857023276;1.02530778551985;803458.864043564
+"2014-04-11 13:15:35.899163-04";1e-16;8.54812299196085;1.15449015331455;904689.65537142
+"2014-04-11 13:56:11.749511-04";1e-16;8.60761834804777;1.15918763336051;908370.727567394
+"2014-04-11 14:47:31.867328-04";1e-16;9;1.16625860360042;913911.730763589
+"2014-04-12 00:42:24.337217-04";1e-16;9;1.2139573425923;951289.750503575
+"2014-04-12 01:49:58.204233-04";1e-16;9;1.21782355859076;954319.421747798
+"2014-04-12 11:12:13.44369-04";1e-16;9;1.25281497052978;981739.636911343
+"2014-04-12 16:28:04.805725-04";1e-16;8.88738419329539;1.26354770645116;990150.098563206
+"2014-04-14 09:47:59.613255-04";1e-16;8.88738419329539;1.31319310326145;1029053.57192946
+"2014-04-14 23:52:04.243865-04";1e-16;8.93086242723555;1.32104564431795;1035207.03511994
+"2014-04-16 01:49:50.452325-04";1e-16;8.97428267140165;1.3319542353358;1043755.30157349
+"2014-04-25 20:26:55.418564-04";1e-16;9.23546905571801;1.35203867255162;1059494.00885561
 */
 
 ALTER TABLE public.itemclusters SET SCHEMA bw;
-ALTER TABLE bw.itemclusters RENAME TO word_cluster5;
+ALTER TABLE bw.itemclusters RENAME TO word2_cluster5;
 
 
 
 --cluster 4
---DROP TABLE bw.c4_word_context;
-CREATE TABLE bw.c4_word_context (
+--DROP TABLE bw.c4_word2_context;
+CREATE TABLE bw.c4_word2_context (
 	cluster_key    INT4,
 	context_word   INT4,
 	tfidf          FLOAT8
 );
-INSERT INTO bw.c4_word_context (cluster_key, context_word, tfidf) (
+INSERT INTO bw.c4_word2_context (cluster_key, context_word, tfidf) (
 	SELECT cluster_key, context_word, SUM(tfidf)
-	FROM bw.word_context AS a, bw.word_cluster5 AS b
+	FROM bw.word_context AS a, bw.word2_cluster5 AS b
 	WHERE a.target_word = b.item_key
 	GROUP BY b.cluster_key, a.context_word
 	ORDER BY b.cluster_key, sum DESC
-);--67,817,855 rows affected
-CREATE INDEX c4_word_context_clusterkey ON bw.c4_word_context (cluster_key);
-ANALYSE bw.c4_word_context;
+);--68,610,174 rows affected
+CREATE INDEX c4_word2_context_clusterkey ON bw.c4_word2_context (cluster_key);
+ANALYSE bw.c4_word2_context;
 
---DROP TABLE bw.c4_word_context_c;
-CREATE TABLE bw.c4_word_context_c (
+--DROP TABLE bw.c4_word2_context_c;
+CREATE TABLE bw.c4_word2_context_c (
 	cluster_key    INT4,
 	context_word   INT4,
 	tfidf          FLOAT8
 );
-INSERT INTO bw.c4_word_context_c (cluster_key, context_word, tfidf) (
+INSERT INTO bw.c4_word2_context_c (cluster_key, context_word, tfidf) (
 	SELECT cluster_key, context_word, tfidf
-	FROM bw.c4_word_context
+	FROM bw.c4_word2_context
 	ORDER BY context_word
-);--67,817,855 rows affected
-CREATE INDEX c4_word_context_contextword ON bw.c4_word_context_c (context_word);
-ANALYSE bw.c4_sentence_bag;
+);--68610174 rows affected
+CREATE INDEX c4_word2_context_contextword ON bw.c4_word2_context_c (context_word);
+ANALYSE bw.c4_word2_context_c;
 
---DROP TABLE bw.c4_idf_norm;
-CREATE TABLE bw.c4_idf_norm (
+--DROP TABLE bw.c4_idf_norm2;
+CREATE TABLE bw.c4_idf_norm2 (
 	cluster_key		INT4,
 	cluster_idf_norm 	FLOAT8,
 	PRIMARY KEY (cluster_key)
 );
-INSERT INTO bw.c4_idf_norm (cluster_key, cluster_idf_norm) (
+INSERT INTO bw.c4_idf_norm2 (cluster_key, cluster_idf_norm) (
 	SELECT cluster_key, sqrt(SUM(power(tfidf,2)))::FLOAT8 AS norm
-	FROM bw.c4_word_context AS c
+	FROM bw.c4_word2_context AS c
 	GROUP BY cluster_key
 );
 
---DROP TABLE bw.word_cluster5_similarity;
-CREATE TABLE bw.word_cluster5_similarity (
+--DROP TABLE bw.word2_cluster5_similarity;
+CREATE TABLE bw.word2_cluster5_similarity (
 	tail		INT4,
 	head		INT4,
 	similarity	FLOAT8
 );
 	
 --http://en.wikipedia.org/wiki/Cosine_similarity
-CREATE OR REPLACE FUNCTION bw.build_word_cluster5_similarity_graph ( cluster_key INT4 ) RETURNS VOID AS $$
-INSERT INTO bw.word_cluster5_similarity (tail, head, similarity) (
+CREATE OR REPLACE FUNCTION bw.build_word2_cluster5_similarity_graph ( cluster_key INT4 ) RETURNS VOID AS $$
+INSERT INTO bw.word2_cluster5_similarity (tail, head, similarity) (
         SELECT  $1,
                 a.cluster_key,
                 dot_product/(c.cluster_idf_norm * b.cluster_idf_norm) AS similarity                
@@ -118,20 +131,20 @@ INSERT INTO bw.word_cluster5_similarity (tail, head, similarity) (
                 SELECT cluster_key, dot_product
                 FROM    (
                         SELECT b.cluster_key, SUM(a.tfidf*b.tfidf)::FLOAT8 AS dot_product
-                        FROM bw.c4_word_context AS a, bw.c4_word_context_c AS b
+                        FROM bw.c4_word2_context AS a, bw.c4_word2_context_c AS b
                         WHERE a.cluster_key = $1 AND a.context_word = b.context_word 
                         GROUP BY b.cluster_key
                         ) AS a
                 WHERE cluster_key != $1
-                ) AS a, bw.c4_idf_norm AS b, bw.c4_idf_norm AS c
+                ) AS a, bw.c4_idf_norm2 AS b, bw.c4_idf_norm2 AS c
         WHERE b.cluster_key = $1 AND c.cluster_key = a.cluster_key
         ORDER BY similarity DESC
         LIMIT 500
 ); $$ LANGUAGE 'SQL';
 
-python parallel_sql.py "SELECT DISTINCT cluster_key FROM bw.word_cluster5" "SELECT bw.build_word_cluster5_similarity_graph (%s);" 8
+python parallel_sql.py "SELECT DISTINCT cluster_key FROM bw.word2_cluster5" "SELECT bw.build_word2_cluster5_similarity_graph (%s);" 8
 
-CREATE INDEX word_cluster5_similarity_tail ON bw.word_cluster5_similarity (tail);
+CREATE INDEX word2_cluster5_similarity_tail ON bw.word2_cluster5_similarity (tail);
 
 --DROP TABLE public.itemclusters;
 CREATE TABLE public.itemclusters (
@@ -139,23 +152,24 @@ CREATE TABLE public.itemclusters (
 	cluster_key	INT4,
 	density		FLOAT8 DEFAULT 0.00000001
 );
-CREATE INDEX word_cluster4_itemkey ON public.itemclusters (item_key);
+CREATE INDEX word2_cluster4_itemkey ON public.itemclusters (item_key);
 
 CREATE SEQUENCE bw.word_cluster4_seq MINVALUE 1 MAXVALUE 7836 CYCLE;
 INSERT INTO public.itemclusters (item_key, cluster_key) (
 	SELECT item_key, nextval('bw.word_cluster4_seq') AS cluster_key
 	FROM	(
 		SELECT DISTINCT tail AS item_key
-		FROM bw.word_cluster5_similarity
+		FROM bw.word2_cluster5_similarity
 		) AS a
 	ORDER BY cluster_key
-);--78364 rows affected
-CREATE INDEX word_cluster4_clusterkey ON public.itemclusters (cluster_key);
+);--78363 rows affected
+CREATE INDEX word2_cluster4_clusterkey ON public.itemclusters (cluster_key);
+
 
 CREATE OR REPLACE FUNCTION public.measure_density(item_key INT4, cluster_key INT4)
     RETURNS FLOAT8 AS $$
 SELECT GREATEST(SUM(similarity), 0.0000000000000001) AS sum
-FROM bw.word_cluster5_similarity AS a, public.itemclusters AS b
+FROM bw.word2_cluster5_similarity AS a, public.itemclusters AS b
 WHERE $1 = a.tail AND a.head = b.item_key AND b.cluster_key = $2
 $$ LANGUAGE 'SQL';
 
@@ -178,14 +192,10 @@ SELECT * FROM public.get_clustering_statistics()
 SELECT now(), MIN(density), MAX(density), AVG(density), SUM(density) FROM public.itemclusters;
 /*
             now(),          MIN(density), MAX(density),   AVG(density),   SUM(density)
-"2014-04-03 22:05:17.554822-04";1e-16;1.34388094320337;0.00966920609890062;757.717666734248
-"2014-04-03 22:45:20.096571-04";1e-16;1.64984054794932;0.299713062079679;23486.714396812
-"2014-04-03 23:50:17.88992-04";1e-16;2.50716473855602;0.65221781922496;51,110.3971857447
-"2014-04-04 15:22:24.9507-04";1e-16;8.89088499019322;2.77875208498729;217,754.128387944
-"2014-04-04 15:58:57.70527-04";1e-16;8.89088499019322;2.78419864043016;218180.942258669
-"2014-04-04 16:25:02.766524-04";1e-16;8.89088499019322;2.78492217859654;218237.641603539
-"2014-04-05 13:03:15.104483-04";1e-16;8.89830242260854;2.79580842831344;219090.731676354
-"2014-04-05 16:41:43.65326-04";1e-16;8.89088499019322;2.79779107500886;219246.099801995
+"2014-04-29 12:46:41.629531-04";1e-16;0.865878040939167;0.00979954449220231;767.92170504245
+
+
+
 "2014-04-05 16:43:31.76777-04";1e-16;8.89088499019322;2.79872595114696;219319.36043568
 */
 

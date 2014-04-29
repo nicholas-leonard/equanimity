@@ -12,9 +12,32 @@ cmd:text('Options:')
 cmd:option('--dataset', 'train', 'train | valid | test')
 cmd:option('--contextSize', 10, 'size of context, i.e. n-1 for n-grams')
 cmd:option('--stepSize', 1000, 'amount of sentences to retrieve per query')
+cmd:option('--wordMap', false, 'outputs a mapping of word strings to word integers')
 opt = cmd:parse(arg or {})
 
 local pg = dp.Postgres()
+local data_path = paths.concat(dp.DATA_DIR, 'billion-words')
+check_and_mkdir(data_path)
+
+if opt.wordMap then
+   local word_map = {}
+   local rows = pg:fetch(
+      "SELECT word_id, word_str, word_count " ..
+      "FROM bw.word_count " ..
+      "ORDER BY word_count DESC"
+   )
+   local word_freq = torch.IntTensor(table.length(rows)):zero()
+   for j, row in ipairs(rows) do
+      local word_id = tonumber(row[1])
+      local word_str = row[2]
+      local word_count = tonumber(row[3])
+      word_freq[word_id] = word_count
+      word_map[word_id] = word_str
+   end
+   torch.save(paths.concat(data_path, 'word_freq.th7'), word_freq)
+   torch.save(paths.concat(data_path, 'word_map.th7'), word_map)
+   os.exit()
+end
 
 local n_word = tonumber(
    pg:fetchOne(
@@ -75,6 +98,5 @@ print("\nloaded " .. n_sentence .. " sentences in " .. os.time()-start_time .. "
 --print(ngrams[{{ngrams:size(1)-100, ngrams:size(1)},{}}])
 --print(corpus[{{corpus:size(1)-100, corpus:size(1)}}])
 
-local data_path = paths.concat(dp.DATA_DIR, 'billion-words')
-check_and_mkdir(data_path)
+
 torch.save(paths.concat(data_path, opt.dataset..'_data.th7'), data)

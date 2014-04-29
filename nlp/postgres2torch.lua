@@ -10,7 +10,6 @@ cmd:text('Example:')
 cmd:text('$> th postgres2torch.lua --dataset train')
 cmd:text('Options:')
 cmd:option('--dataset', 'train', 'train | valid | test')
-cmd:option('--contextSize', 10, 'size of context, i.e. n-1 for n-grams')
 cmd:option('--stepSize', 1000, 'amount of sentences to retrieve per query')
 cmd:option('--wordMap', false, 'outputs a mapping of word strings to word integers')
 opt = cmd:parse(arg or {})
@@ -46,12 +45,11 @@ local n_word = tonumber(
    )[1]
 )
 
-local data = torch.IntTensor(n_word, 3)
---sequence of words where sentences are delimited by <s/>
-local corpus = data:select(2, 3)
---variable length n-grams where length <= n 
---and tensor holds start and end indices of ngram in corpus
-local ngrams = data:narrow(2, 1, 2)
+local data = torch.IntTensor(n_word, 2)
+--sequence of words where sentences are delimited by </s>
+local corpus = data:select(2, 2)
+--holds start indices of sentence of word at same index in corpus
+local delimiters = data:select(2, 1)
 
 -- contenxt_size of n-gram (i.e.: n-1)
 local context_size = opt.contextSize
@@ -84,11 +82,7 @@ for i=1,n_sentence,step do
       )
       local sentence_size = sentence_words:size(1)
       corpus:narrow(1, sentence_idx, sentence_size):copy(sentence_words)
-      for word_idx=sentence_idx,sentence_idx+sentence_size-1 do
-         local ngram = ngrams:select(1,word_idx)
-         ngram[1] = math.max(sentence_idx, word_idx-context_size)
-         ngram[2] = word_idx
-      end
+      delimiters:narrow(1, sentence_idx, sentence_size):fill(sentence_idx)
       sentence_idx = sentence_idx + sentence_size
    end
    xlua.progress(i, n_sentence)

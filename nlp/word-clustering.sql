@@ -1,5 +1,4 @@
-﻿--DROP TABLE bw.sentence_similarity
---DROP SEQUENCE bw.word_pos_seq;
+﻿--DROP SEQUENCE bw.word_pos_seq;
 CREATE SEQUENCE bw.word_pos_seq MINVALUE 1;
 CREATE TABLE bw.sentence_word (
 	word_pos	INT4 DEFAULT nextval('bw.word_pos_seq'),
@@ -679,3 +678,98 @@ SELECT now(), MIN(density), MAX(density), AVG(density), SUM(density) FROM public
 "2014-04-08 11:50:08.410578-04";0.819812222942905;9.38691881957718;5.50862530709135;429.672773953125
 "2014-04-08 15:00:44.734685-04";0.521600890890975;15.0471630571185;7.26388062798665;566.582688982959
 */
+
+CREATE TABLE bw.word_cluster(
+	parent_id	INT4,
+	child_ids	INT4[],
+	PRIMARY KEY (parent_id)
+);
+
+INSERT INTO bw.word_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT cluster_key+max AS cluster_key, item_key
+		FROM 	(
+			SELECT MAX(item_key) FROM bw.word_cluster5 
+			) AS a, bw.word_cluster5 AS b
+		) AS a
+	GROUP BY cluster_key
+);
+
+SELECT MIN(parent_id), MAX(parent_id), MAX(parent_id)-MIN(parent_id) FROM bw.word_cluster
+
+INSERT INTO bw.word_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT cluster_key+871835 AS cluster_key, item_key+793471 AS item_key
+		FROM bw.word_cluster4
+		) AS a
+	GROUP BY cluster_key
+);
+
+INSERT INTO bw.word_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT cluster_key+879671 AS cluster_key, item_key+793471+78364 AS item_key
+		FROM bw.word_cluster3
+		) AS a
+	GROUP BY cluster_key
+);
+
+INSERT INTO bw.word_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT cluster_key+879671+783 AS cluster_key, item_key+793471+78364+7836 AS item_key
+		FROM bw.word_cluster2
+		) AS a
+	GROUP BY cluster_key
+);
+
+INSERT INTO bw.word_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT cluster_key+879671+783+78 AS cluster_key, item_key+793471+78364+7836+783 AS item_key
+		FROM bw.word_cluster1
+		) AS a
+	GROUP BY cluster_key
+);
+
+-- analysis
+SELECT COUNT(*) FROM bw.word_count --793471
+SELECT SUM(array_upper(child_ids, 1)) FROM bw.word_cluster --870700
+SELECT COUNT(*) FROM bw.word_cluster5 --783639 we dont have all words
+SELECT 793471+78364+7836+783+78 --880532
+SELECT 783639+78364+7836+783+78 --870700 -- we are  missing 10k words
+SELECT MIN(child_id), MAX(child_id), COUNT(*) 
+FROM	(
+	SELECT DISTINCT child_id
+	FROM 	(
+		SELECT unnest(child_ids) AS child_id
+		FROM bw.word_cluster
+		) AS a
+	) AS a --1;880532;870700
+	
+-- we can add the missing words to a cluster attached to the root of the tree (a cluster 2):
+SELECT MAX(parent_id) FROM bw.word_cluster--880540
+INSERT INTO bw.word_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT 880541 AS cluster_key, a.word_id AS item_key
+		FROM bw.word_count AS a
+		WHERE (SELECT item_key FROM bw.word_cluster5 AS b WHERE item_key = word_id LIMIT 1) IS NULL
+		) AS a
+	GROUP BY cluster_key
+);
+
+INSERT INTO bw.word_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT -1 AS cluster_key, cluster_key+879671+783+78+8+1 AS item_key
+		FROM 	(
+			SELECT DISTINCT cluster_key FROM bw.word_cluster1
+			) AS a
+		UNION ALL
+		SELECT -1, 880541
+		) AS a
+	GROUP BY cluster_key
+);

@@ -8,15 +8,36 @@ cmd:text()
 cmd:text('Generate torch dump for billion-words dataset')
 cmd:text('Example:')
 cmd:text('$> th postgres2torch.lua --dataset train')
+cmd:text('$> th postgres2torch.lua --treeTable "bw.word_cluster" --treeFile "word_tree1.th7"')
 cmd:text('Options:')
 cmd:option('--dataset', 'train', 'train | valid | test')
 cmd:option('--stepSize', 1000, 'amount of sentences to retrieve per query')
+
 cmd:option('--wordMap', false, 'outputs a mapping of word strings to word integers')
+
+cmd:option('--treeTable', '', 'Name of the table containing a hierarchy of words. Used for hierarchical softmaxes.')
+cmd:option('--treeFile', '', 'Name of the file where to save the torch dump.')
+
 opt = cmd:parse(arg or {})
 
 local pg = dp.Postgres()
-local data_path = paths.concat(dp.DATA_DIR, 'billion-words')
-check_and_mkdir(data_path)
+local data_path = paths.concat(dp.DATA_DIR, 'BillionWords')
+dp.check_and_mkdir(data_path)
+
+if opt.treeTable ~= '' then
+   assert(opt.treeFile ~= '', 'specify a file to save the torch dump')
+   local rows = pg:fetch(
+      "SELECT parent_id, child_ids FROM "..opt.treeTable
+   )
+   local tree = {}
+   for j, row in ipairs(rows) do
+      local parent_id, child_ids = row[1], row[2]
+      local children = torch.IntTensor(table.fromString(child_ids))
+      tree[parent_id] = children
+   end
+   torch.save(paths.concat(data_path, opt.treeFile), tree)
+   os.exit()
+end
 
 if opt.wordMap then
    local word_map = {}

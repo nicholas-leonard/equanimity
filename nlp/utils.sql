@@ -3,6 +3,10 @@ FROM bw.sentence_bag_s AS a, bw.word_count AS b
 WHERE a.word_id = b.word_id AND (sentence_id = 1 OR sentence_id = 680457 OR sentence_id = 622357 OR sentence_id = 718412 OR sentence_id = 326372 OR sentence_id = 248225)
 ORDER BY sentence_id ASC
 
+SELECT MAX(sentence_id), COUNT(*) FROM bw.train_sentence;
+
+SELECT SUM(array_upper(sentence_words, 1)-1) FROM bw.train_sentence AS a WHERE sentence_id < 38000
+
 SELECT word_id, word_str, word_count FROM bw.word_count ORDER BY word_count DESC LIMIT 100
 SELECT MAX(word_id), MIN(word_id), COUNT(*) FROM bw.word_count
 

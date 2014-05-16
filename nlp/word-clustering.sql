@@ -764,7 +764,7 @@ INSERT INTO bw.word_cluster (parent_id, child_ids) (
 INSERT INTO bw.word_cluster (parent_id, child_ids) (
 	SELECT cluster_key, array_agg(item_key)
 	FROM	(
-		SELECT -1 AS cluster_key, cluster_key+879671+783+78+8+1 AS item_key
+		SELECT -1 AS cluster_key, cluster_key+879671+783+78 AS item_key
 		FROM 	(
 			SELECT DISTINCT cluster_key FROM bw.word_cluster1
 			) AS a
@@ -773,3 +773,19 @@ INSERT INTO bw.word_cluster (parent_id, child_ids) (
 		) AS a
 	GROUP BY cluster_key
 );
+
+CREATE TABLE bw.word_cluster_temp (
+	parent_id	INT4,
+	child_id	INT4
+);
+INSERT INTO bw.word_cluster_temp (
+	SELECT parent_id, unnest(child_ids) FROM bw.word_cluster
+);
+CREATE INDEX word_cluster_temp_idx1 ON bw.word_cluster_temp (parent_id);
+CREATE INDEX word_cluster_temp_idx2 ON bw.word_cluster_temp (child_id);
+
+SELECT parent_id FROM bw.word_cluster AS a WHERE (SELECT child_id FROM bw.word_cluster_temp IS NULL)
+
+SELECT * FROM bw.word_cluster_temp WHERE parent_id = 880539
+
+SELECT 880539-(793471+78364+7836+783+78)

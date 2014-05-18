@@ -679,6 +679,8 @@ SELECT now(), MIN(density), MAX(density), AVG(density), SUM(density) FROM public
 "2014-04-08 15:00:44.734685-04";0.521600890890975;15.0471630571185;7.26388062798665;566.582688982959
 */
 
+ALTER TABLE bw.word_cluster RENAME TO word_cluster_old;
+--DROP TABLE bw.word_cluster;
 CREATE TABLE bw.word_cluster(
 	parent_id	INT4,
 	child_ids	INT4[],
@@ -764,12 +766,12 @@ INSERT INTO bw.word_cluster (parent_id, child_ids) (
 INSERT INTO bw.word_cluster (parent_id, child_ids) (
 	SELECT cluster_key, array_agg(item_key)
 	FROM	(
-		SELECT -1 AS cluster_key, cluster_key+879671+783+78 AS item_key
+		SELECT 880542 AS cluster_key, cluster_key+879671+783+78 AS item_key
 		FROM 	(
 			SELECT DISTINCT cluster_key FROM bw.word_cluster1
 			) AS a
 		UNION ALL
-		SELECT -1, 880541
+		SELECT 880542, 880541
 		) AS a
 	GROUP BY cluster_key
 );

@@ -325,7 +325,7 @@ SELECT now(), MIN(density), MAX(density), AVG(density), SUM(density) FROM public
 ALTER TABLE public.itemclusters SET SCHEMA bw;
 ALTER TABLE bw.itemclusters RENAME TO word3_cluster3;
 
-
+--here
 
 --cluster 2
 --DROP TABLE bw.c2_word3_context;
@@ -433,7 +433,9 @@ UPDATE public.itemclusters SET density = public.measure_density(item_key, cluste
 SELECT now(), MIN(density), MAX(density), AVG(density), SUM(density) FROM public.itemclusters;
 /*
             now(),          MIN(density), MAX(density),   AVG(density),   SUM(density)
-"2014-05-03 00:10:36.171277-04";1e-16;2.81614212583415;0.69873944946332;547.112988929779
+"2014-05-17 21:49:55.840871-04";1e-16;2.63798407606359;0.696545585572221;545.395193503049
+
+\
 "2014-05-03 00:17:17.152074-04";1e-16;7.43448636635493;2.34153083315739;1833.41864236224
 
 "2014-04-08 10:53:14.984615-04";1e-16;8.10712832858916;2.38806904288253;1869.85806057702

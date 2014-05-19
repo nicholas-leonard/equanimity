@@ -89,7 +89,7 @@ if opt.dataset == 'small' then
          local sentence_words = torch.IntTensor(
             _.map(
                _.split(string.sub(row[2], 9, -2), ','), 
-               function(str) return tonumber(str) end
+               function(k, str) return tonumber(str) end
             )
          )
          local sentence_size = sentence_words:size(1)
@@ -129,7 +129,7 @@ elseif opt.dataset == 'tiny' then
          local sentence_words = torch.IntTensor(
             _.map(
                _.split(string.sub(row[2], 9, -2), ','), 
-               function(str) return tonumber(str) end
+               function(k, str) return tonumber(str) end
             )
          )
          local sentence_size = sentence_words:size(1)
@@ -179,7 +179,7 @@ for i=1,n_sentence,step do
       local sentence_words = torch.IntTensor(
          _.map(
             _.split(string.sub(row[2], 9, -2), ','), 
-            function(str) return tonumber(str) end
+            function(k, str) return tonumber(str) end
          )
       )
       local sentence_size = sentence_words:size(1)

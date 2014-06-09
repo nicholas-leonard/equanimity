@@ -1,16 +1,16 @@
-﻿CREATE OR REPLACE FUNCTION bw.filter_word_similarity_graph ( cluster_key INT4 ) RETURNS VOID AS $$
-DELETE FROM bw.word_similarity
-USING bw.word_cluster5 AS a, bw.word_cluster4 AS b, bw.word_cluster4 AS c, bw.word_cluster5 AS d
+﻿CREATE OR REPLACE FUNCTION bw.filter_word2_similarity_graph ( cluster_key INT4 ) RETURNS VOID AS $$
+DELETE FROM bw.word2_similarity
+USING bw.word2_cluster5 AS a, bw.word2_cluster4 AS b, bw.word2_cluster4 AS c, bw.word2_cluster5 AS d
 WHERE tail = $1 AND a.item_key = tail AND a.cluster_key = b.item_key 
 AND b.cluster_key = c.cluster_key AND c.item_key = d.cluster_key AND d.item_key = head;
 $$ LANGUAGE 'SQL';
 
-python parallel_sql.py "SELECT word_id FROM bw.word_count" "SELECT bw.filter_word_similarity_graph (%s);" 8
+python parallel_sql.py "SELECT word2_id FROM bw.word2_count" "SELECT bw.filter_word2_similarity_graph (%s);" 8
 
 -- missing some words... will require frequency based softmax
-SELECT COUNT(*) FROM (SELECT DISTINCT target_word FROM bw.word_context) As a--783665
-SELECT COUNT(*) FROM (SELECT DISTINCT tail FROM bw.word_similarity) As a--783627
-SELECT COUNT(*) FROM bw.word_count --793471
+SELECT COUNT(*) FROM (SELECT DISTINCT target_word FROM bw.word2_context) As a--783665
+SELECT COUNT(*) FROM (SELECT DISTINCT tail FROM bw.word2_similarity) As a--783627
+SELECT COUNT(*) FROM bw.word2_count --793471
 
 -- word 2 cluster 5
 --DROP TABLE public.itemclusters;
@@ -25,7 +25,7 @@ INSERT INTO public.itemclusters (item_key, cluster_key) (
 	SELECT item_key, nextval('bw.word2_cluster5_seq') AS cluster_key
 	FROM	(
 		SELECT DISTINCT tail AS item_key
-		FROM bw.word_similarity
+		FROM bw.word2_similarity
 		) AS a
 	ORDER BY cluster_key
 );--783627 rows affected
@@ -35,7 +35,7 @@ CREATE INDEX word2cluster5_clusterkey ON public.itemclusters (cluster_key);
 CREATE OR REPLACE FUNCTION public.measure_density(item_key INT4, cluster_key INT4)
     RETURNS FLOAT8 AS $$
 SELECT GREATEST(SUM(similarity), 0.0000000000000001) AS sum
-FROM bw.word_similarity AS a, public.itemclusters AS b
+FROM bw.word2_similarity AS a, public.itemclusters AS b
 WHERE $1 = a.tail AND a.head = b.item_key AND b.cluster_key = $2
 $$ LANGUAGE 'SQL';
 
@@ -80,7 +80,7 @@ CREATE TABLE bw.c4_word2_context (
 );
 INSERT INTO bw.c4_word2_context (cluster_key, context_word, tfidf) (
 	SELECT cluster_key, context_word, SUM(tfidf)
-	FROM bw.word_context AS a, bw.word2_cluster5 AS b
+	FROM bw.word2_context AS a, bw.word2_cluster5 AS b
 	WHERE a.target_word = b.item_key
 	GROUP BY b.cluster_key, a.context_word
 	ORDER BY b.cluster_key, sum DESC
@@ -154,9 +154,9 @@ CREATE TABLE public.itemclusters (
 );
 CREATE INDEX word2_cluster4_itemkey ON public.itemclusters (item_key);
 
-CREATE SEQUENCE bw.word_cluster4_seq MINVALUE 1 MAXVALUE 7836 CYCLE;
+CREATE SEQUENCE bw.word2_cluster4_seq MINVALUE 1 MAXVALUE 7836 CYCLE;
 INSERT INTO public.itemclusters (item_key, cluster_key) (
-	SELECT item_key, nextval('bw.word_cluster4_seq') AS cluster_key
+	SELECT item_key, nextval('bw.word2_cluster4_seq') AS cluster_key
 	FROM	(
 		SELECT DISTINCT tail AS item_key
 		FROM bw.word2_cluster5_similarity
@@ -223,7 +223,7 @@ CREATE TABLE bw.c3_word2_context (
 );
 INSERT INTO bw.c3_word2_context (cluster_key, context_word, tfidf) (
 	SELECT c.cluster_key, context_word, SUM(tfidf)
-	FROM bw.word_context AS a, bw.word2_cluster5 AS b, bw.word2_cluster4 AS c
+	FROM bw.word2_context AS a, bw.word2_cluster5 AS b, bw.word2_cluster4 AS c
 	WHERE a.target_word = b.item_key AND b.cluster_key = c.item_key
 	GROUP BY c.cluster_key, a.context_word
 	ORDER BY c.cluster_key, sum DESC
@@ -299,7 +299,7 @@ CREATE INDEX word2_cluster3_itemkey ON public.itemclusters (item_key);
 
 CREATE SEQUENCE bw.word2_cluster3_seq MINVALUE 1 MAXVALUE 783 CYCLE;
 INSERT INTO public.itemclusters (item_key, cluster_key) (
-	SELECT item_key, nextval('bw.word_cluster3_seq') AS cluster_key
+	SELECT item_key, nextval('bw.word2_cluster3_seq') AS cluster_key
 	FROM	(
 		SELECT DISTINCT tail AS item_key
 		FROM bw.word2_cluster4_similarity
@@ -351,7 +351,7 @@ CREATE TABLE bw.c2_word2_context (
 );
 INSERT INTO bw.c2_word2_context (cluster_key, context_word, tfidf) (
 	SELECT d.cluster_key, context_word, SUM(tfidf)
-	FROM bw.word_context AS a, bw.word2_cluster5 AS b, bw.word2_cluster4 AS c, bw.word2_cluster3 AS d
+	FROM bw.word2_context AS a, bw.word2_cluster5 AS b, bw.word2_cluster4 AS c, bw.word2_cluster3 AS d
 	WHERE a.target_word = b.item_key AND b.cluster_key = c.item_key AND c.cluster_key = d.item_key
 	GROUP BY d.cluster_key, a.context_word
 	ORDER BY d.cluster_key, sum DESC
@@ -427,7 +427,7 @@ CREATE INDEX word2_cluster2_itemkey ON public.itemclusters (item_key);
 
 CREATE SEQUENCE bw.word2_cluster2_seq MINVALUE 1 MAXVALUE 78 CYCLE;
 INSERT INTO public.itemclusters (item_key, cluster_key) (
-	SELECT item_key, nextval('bw.word_cluster2_seq') AS cluster_key
+	SELECT item_key, nextval('bw.word2_cluster2_seq') AS cluster_key
 	FROM	(
 		SELECT DISTINCT tail AS item_key
 		FROM bw.word2_cluster3_similarity
@@ -467,7 +467,7 @@ CREATE TABLE bw.c1_word2_context (
 );
 INSERT INTO bw.c1_word2_context (cluster_key, context_word, tfidf) (
 	SELECT e.cluster_key, context_word, SUM(tfidf)
-	FROM bw.word_context AS a, bw.word2_cluster5 AS b, bw.word2_cluster4 AS c, bw.word2_cluster3 AS d, bw.word2_cluster2 AS e
+	FROM bw.word2_context AS a, bw.word2_cluster5 AS b, bw.word2_cluster4 AS c, bw.word2_cluster3 AS d, bw.word2_cluster2 AS e
 	WHERE a.target_word = b.item_key AND b.cluster_key = c.item_key AND c.cluster_key = d.item_key AND d.cluster_key = e.item_key
 	GROUP BY e.cluster_key, a.context_word
 	ORDER BY e.cluster_key, sum DESC
@@ -543,7 +543,7 @@ CREATE INDEX word2_cluster1_itemkey ON public.itemclusters (item_key);
 
 CREATE SEQUENCE bw.word2_cluster1_seq MINVALUE 1 MAXVALUE 8 CYCLE;
 INSERT INTO public.itemclusters (item_key, cluster_key) (
-	SELECT item_key, nextval('bw.word_cluster1_seq') AS cluster_key
+	SELECT item_key, nextval('bw.word2_cluster1_seq') AS cluster_key
 	FROM	(
 		SELECT DISTINCT tail AS item_key
 		FROM bw.word2_cluster2_similarity
@@ -573,3 +573,116 @@ SELECT now(), MIN(density), MAX(density), AVG(density), SUM(density) FROM public
 
 ALTER TABLE public.itemclusters SET SCHEMA bw;
 ALTER TABLE bw.itemclusters RENAME TO word2_cluster1;
+
+--DROP TABLE bw.word2_cluster;
+CREATE TABLE bw.word2_cluster(
+	parent_id	INT4,
+	child_ids	INT4[],
+	PRIMARY KEY (parent_id)
+);
+
+INSERT INTO bw.word2_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT cluster_key+max AS cluster_key, item_key
+		FROM 	(
+			SELECT MAX(item_key) FROM bw.word2_cluster5 
+			) AS a, bw.word2_cluster5 AS b
+		) AS a
+	GROUP BY cluster_key
+);
+
+SELECT MIN(parent_id), MAX(parent_id), MAX(parent_id)-MIN(parent_id) FROM bw.word2_cluster --793472;871834;78362
+INSERT INTO bw.word2_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT cluster_key+871834 AS cluster_key, item_key+793471 AS item_key
+		FROM bw.word2_cluster4
+		) AS a
+	GROUP BY cluster_key
+);
+SELECT COUNT(*) FROM bw.word2_cluster4--78363
+INSERT INTO bw.word2_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT cluster_key+879670 AS cluster_key, item_key+793471+78363 AS item_key
+		FROM bw.word2_cluster3
+		) AS a
+	GROUP BY cluster_key
+);
+SELECT COUNT(*) FROM bw.word2_cluster3--7836
+INSERT INTO bw.word2_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT cluster_key+880453 AS cluster_key, item_key+793471+78363+7836 AS item_key
+		FROM bw.word2_cluster2
+		) AS a
+	GROUP BY cluster_key
+);
+SELECT COUNT(*) FROM bw.word2_cluster2--783
+INSERT INTO bw.word2_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT cluster_key+880531 AS cluster_key, item_key+793471+78363+7836+783 AS item_key
+		FROM bw.word2_cluster1
+		) AS a
+	GROUP BY cluster_key
+);
+
+-- analysis
+SELECT COUNT(*) FROM bw.word2_cluster1--78
+SELECT COUNT(*) FROM bw.word_count --793471
+SELECT SUM(array_upper(child_ids, 1)) FROM bw.word2_cluster --870687
+SELECT COUNT(*) FROM bw.word2_cluster5 --783627 we dont have all words
+SELECT 793471+78363+7836+783+78 --880531
+SELECT 783627+78363+7836+783+78 --870687 -- we are  missing 10k words
+SELECT MIN(child_id), MAX(child_id), COUNT(*) 
+FROM	(
+	SELECT DISTINCT child_id
+	FROM 	(
+		SELECT unnest(child_ids) AS child_id
+		FROM bw.word2_cluster
+		) AS a
+	) AS a --1;880531;870687
+	
+-- we can add the missing words to a cluster attached to the root of the tree (a cluster 2):
+SELECT MAX(parent_id) FROM bw.word2_cluster--880539
+INSERT INTO bw.word2_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT 880540 AS cluster_key, a.word_id AS item_key
+		FROM bw.word_count AS a
+		WHERE (SELECT item_key FROM bw.word2_cluster5 AS b WHERE item_key = word_id LIMIT 1) IS NULL
+		) AS a
+	GROUP BY cluster_key
+);
+--here
+SELECT 793471+78363+7836+783+78  
+INSERT INTO bw.word2_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT 880542 AS cluster_key, cluster_key+880531 AS item_key
+		FROM 	(
+			SELECT DISTINCT cluster_key FROM bw.word2_cluster1
+			) AS a
+		UNION ALL
+		SELECT 880542, 880540
+		) AS a
+	GROUP BY cluster_key
+);
+
+SELECT MIN(parent_id) FROM bw.word2_cluster
+--DROP TABLE bw.word2_cluster_temp;
+CREATE TABLE bw.word2_cluster_temp (
+	parent_id	INT4,
+	child_id	INT4
+);
+INSERT INTO bw.word2_cluster_temp (
+	SELECT parent_id, unnest(child_ids) FROM bw.word2_cluster
+);
+CREATE INDEX word2_cluster_temp_idx1 ON bw.word2_cluster_temp (parent_id);
+CREATE UNIQUE INDEX word2_cluster_temp_idx2 ON bw.word2_cluster_temp (child_id);
+
+SELECT * FROM bw.word2_cluster_temp WHERE parent_id = 880539
+
+SELECT 880539-(793471+78364+7836+783+78)

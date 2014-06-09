@@ -1,11 +1,11 @@
-﻿CREATE OR REPLACE FUNCTION bw.filter_word2_similarity_graph ( item_key INT4 ) RETURNS VOID AS $$
+﻿CREATE OR REPLACE FUNCTION bw.filter_word3_similarity_graph ( item_key INT4 ) RETURNS VOID AS $$
 DELETE FROM bw.word_similarity
-USING bw.word2_cluster5 AS a, bw.word2_cluster4 AS b, bw.word2_cluster4 AS c, bw.word2_cluster5 AS d
+USING bw.word3_cluster5 AS a, bw.word3_cluster4 AS b, bw.word3_cluster4 AS c, bw.word3_cluster5 AS d
 WHERE tail = $1 AND a.item_key = tail AND a.cluster_key = b.item_key 
 AND b.cluster_key = c.cluster_key AND c.item_key = d.cluster_key AND d.item_key = head;
 $$ LANGUAGE 'SQL';
 
-python parallel_sql.py "SELECT word_id FROM bw.word_count" "SELECT bw.filter_word2_similarity_graph (%s);" 8
+python parallel_sql.py "SELECT word_id FROM bw.word_count" "SELECT bw.filter_word3_similarity_graph (%s);" 8
 SELECT COUNT(*) FROM bw.word_similarity--503367310 vs 522312872  (lost 25 million)
 
 -- missing some words... will require frequency based softmax
@@ -325,8 +325,6 @@ SELECT now(), MIN(density), MAX(density), AVG(density), SUM(density) FROM public
 ALTER TABLE public.itemclusters SET SCHEMA bw;
 ALTER TABLE bw.itemclusters RENAME TO word3_cluster3;
 
---here
-
 --cluster 2
 --DROP TABLE bw.c2_word3_context;
 CREATE TABLE bw.c2_word3_context (
@@ -496,7 +494,6 @@ CREATE TABLE bw.word3_cluster2_similarity (
 	similarity	FLOAT8
 );
 
---here
 --http://en.wikipedia.org/wiki/Cosine_similarity
 CREATE OR REPLACE FUNCTION bw.build_word3_cluster2_similarity_graph ( cluster_key INT4 ) RETURNS VOID AS $$
 INSERT INTO bw.word3_cluster2_similarity (tail, head, similarity) (
@@ -552,6 +549,9 @@ UPDATE public.itemclusters SET density = public.measure_density(item_key, cluste
 SELECT now(), MIN(density), MAX(density), AVG(density), SUM(density) FROM public.itemclusters;
 /*
             now(),          MIN(density), MAX(density),   AVG(density),   SUM(density)
+"2014-06-07 23:27:08.634071-04";0.341672948343242;5.31485950603995;2.764897347223;215.661993083394
+"2014-06-07 23:41:31.771099-04";0.300650119014627;7.50960559221248;3.50883197577138;273.688894110168
+            
 "2014-05-03 19:00:49.670045-04";0.679805119013395;5.08621007219643;2.8778059505398;224.468864142105
 "2014-05-04 15:08:41.399982-04";0.398090259563034;9.31274572480048;4.02156683126238;313.682212838466
             
@@ -561,3 +561,115 @@ SELECT now(), MIN(density), MAX(density), AVG(density), SUM(density) FROM public
 
 ALTER TABLE public.itemclusters SET SCHEMA bw;
 ALTER TABLE bw.itemclusters RENAME TO word3_cluster1;
+
+--DROP TABLE bw.word3_cluster;
+CREATE TABLE bw.word3_cluster(
+	parent_id	INT4,
+	child_ids	INT4[],
+	PRIMARY KEY (parent_id)
+);
+
+INSERT INTO bw.word3_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT cluster_key+max AS cluster_key, item_key
+		FROM 	(
+			SELECT MAX(item_key) FROM bw.word3_cluster5 
+			) AS a, bw.word3_cluster5 AS b
+		) AS a
+	GROUP BY cluster_key
+);
+
+SELECT MAX(parent_id) FROM bw.word3_cluster --871833
+INSERT INTO bw.word3_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT cluster_key+871833 AS cluster_key, item_key+793471 AS item_key
+		FROM bw.word3_cluster4
+		) AS a
+	GROUP BY cluster_key
+);
+SELECT COUNT(*) FROM bw.word3_cluster4--78362
+INSERT INTO bw.word3_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT cluster_key+879669 AS cluster_key, item_key+793471+78362 AS item_key
+		FROM bw.word3_cluster3
+		) AS a
+	GROUP BY cluster_key
+);
+SELECT COUNT(*) FROM bw.word3_cluster3--7836
+INSERT INTO bw.word3_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT cluster_key+880452 AS cluster_key, item_key+793471+78362+7836 AS item_key
+		FROM bw.word3_cluster2
+		) AS a
+	GROUP BY cluster_key
+);
+SELECT COUNT(*) FROM bw.word3_cluster2--783
+INSERT INTO bw.word3_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT cluster_key+880530 AS cluster_key, item_key+793471+78362+7836+783 AS item_key
+		FROM bw.word3_cluster1
+		) AS a
+	GROUP BY cluster_key
+);
+--here
+-- analysis
+SELECT COUNT(*) FROM bw.word3_cluster1--78
+SELECT COUNT(*) FROM bw.word_count --793471
+SELECT SUM(array_upper(child_ids, 1)) FROM bw.word3_cluster --870687
+SELECT COUNT(*) FROM bw.word3_cluster5 --783627 we dont have all words
+SELECT 793471+78363+7836+783+78 --880531
+SELECT 783627+78363+7836+783+78 --870687 -- we are  missing 10k words
+SELECT MIN(child_id), MAX(child_id), COUNT(*) 
+FROM	(
+	SELECT DISTINCT child_id
+	FROM 	(
+		SELECT unnest(child_ids) AS child_id
+		FROM bw.word3_cluster
+		) AS a
+	) AS a --1;880531;870687
+	
+-- we can add the missing words to a cluster attached to the root of the tree (a cluster 2):
+SELECT MAX(parent_id) FROM bw.word3_cluster--880539
+INSERT INTO bw.word3_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT 880540 AS cluster_key, a.word_id AS item_key
+		FROM bw.word_count AS a
+		WHERE (SELECT item_key FROM bw.word3_cluster5 AS b WHERE item_key = word_id LIMIT 1) IS NULL
+		) AS a
+	GROUP BY cluster_key
+);
+SELECT 793471+78363+7836+783+78  
+INSERT INTO bw.word3_cluster (parent_id, child_ids) (
+	SELECT cluster_key, array_agg(item_key)
+	FROM	(
+		SELECT 880542 AS cluster_key, cluster_key+880531 AS item_key
+		FROM 	(
+			SELECT DISTINCT cluster_key FROM bw.word3_cluster1
+			) AS a
+		UNION ALL
+		SELECT 880542, 880540
+		) AS a
+	GROUP BY cluster_key
+);
+
+SELECT MIN(parent_id) FROM bw.word3_cluster
+--DROP TABLE bw.word3_cluster_temp;
+CREATE TABLE bw.word3_cluster_temp (
+	parent_id	INT4,
+	child_id	INT4
+);
+INSERT INTO bw.word3_cluster_temp (
+	SELECT parent_id, unnest(child_ids) FROM bw.word3_cluster
+);
+CREATE INDEX word3_cluster_temp_idx1 ON bw.word3_cluster_temp (parent_id);
+CREATE UNIQUE INDEX word3_cluster_temp_idx2 ON bw.word3_cluster_temp (child_id);
+
+SELECT * FROM bw.word3_cluster_temp WHERE parent_id = 880539
+
+SELECT 880539-(793471+78364+7836+783+78)

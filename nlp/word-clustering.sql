@@ -680,6 +680,7 @@ SELECT now(), MIN(density), MAX(density), AVG(density), SUM(density) FROM public
 */
 
 ALTER TABLE bw.word_cluster RENAME TO word_cluster_old;
+
 --DROP TABLE bw.word_cluster;
 CREATE TABLE bw.word_cluster(
 	parent_id	INT4,
@@ -698,7 +699,7 @@ INSERT INTO bw.word_cluster (parent_id, child_ids) (
 	GROUP BY cluster_key
 );
 
-SELECT MIN(parent_id), MAX(parent_id), MAX(parent_id)-MIN(parent_id) FROM bw.word_cluster
+SELECT MIN(parent_id), MAX(parent_id), MAX(parent_id)-MIN(parent_id) FROM bw.word_cluster --793472;871835;78363
 
 INSERT INTO bw.word_cluster (parent_id, child_ids) (
 	SELECT cluster_key, array_agg(item_key)
@@ -776,6 +777,7 @@ INSERT INTO bw.word_cluster (parent_id, child_ids) (
 	GROUP BY cluster_key
 );
 
+SELECT MIN(parent_id) FROM bw.word_cluster
 CREATE TABLE bw.word_cluster_temp (
 	parent_id	INT4,
 	child_id	INT4

@@ -166,7 +166,7 @@ INSERT INTO public.itemclusters (item_key, cluster_key) (
 		) AS a
 	ORDER BY cluster_key
 );--100 rows affected
-CREATE INDEX itemclusters_clusterkey78 ON public.itemclusters (cluster_key);
+CREATE INDEX itemclusters_clusterkey79 ON public.itemclusters (cluster_key);
 
 CREATE OR REPLACE FUNCTION public.measure_density(item_key INT4, cluster_key INT4)
     RETURNS FLOAT8 AS $$

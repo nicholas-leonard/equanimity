@@ -616,14 +616,14 @@ INSERT INTO bw.word3_cluster (parent_id, child_ids) (
 		) AS a
 	GROUP BY cluster_key
 );
---here
 -- analysis
 SELECT COUNT(*) FROM bw.word3_cluster1--78
 SELECT COUNT(*) FROM bw.word_count --793471
-SELECT SUM(array_upper(child_ids, 1)) FROM bw.word3_cluster --870687
-SELECT COUNT(*) FROM bw.word3_cluster5 --783627 we dont have all words
-SELECT 793471+78363+7836+783+78 --880531
-SELECT 783627+78363+7836+783+78 --870687 -- we are  missing 10k words
+SELECT SUM(array_upper(child_ids, 1)) FROM bw.word3_cluster --870681 vs 7
+SELECT COUNT(*) FROM bw.word3_cluster5 --783622 vs 7 we dont have all words
+SELECT 793471+78362+7836+783+78 --880530
+SELECT 783622+78362+7836+783+78 --870681 -- we are  missing 10k words
+--here
 SELECT MIN(child_id), MAX(child_id), COUNT(*) 
 FROM	(
 	SELECT DISTINCT child_id
@@ -631,29 +631,29 @@ FROM	(
 		SELECT unnest(child_ids) AS child_id
 		FROM bw.word3_cluster
 		) AS a
-	) AS a --1;880531;870687
+	) AS a --1;880530;870681
 	
 -- we can add the missing words to a cluster attached to the root of the tree (a cluster 2):
-SELECT MAX(parent_id) FROM bw.word3_cluster--880539
+SELECT MAX(parent_id) FROM bw.word3_cluster--880538
 INSERT INTO bw.word3_cluster (parent_id, child_ids) (
 	SELECT cluster_key, array_agg(item_key)
 	FROM	(
-		SELECT 880540 AS cluster_key, a.word_id AS item_key
+		SELECT 880539 AS cluster_key, a.word_id AS item_key
 		FROM bw.word_count AS a
 		WHERE (SELECT item_key FROM bw.word3_cluster5 AS b WHERE item_key = word_id LIMIT 1) IS NULL
 		) AS a
 	GROUP BY cluster_key
 );
-SELECT 793471+78363+7836+783+78  
+SELECT 793471+78362+7836+783+78  
 INSERT INTO bw.word3_cluster (parent_id, child_ids) (
 	SELECT cluster_key, array_agg(item_key)
 	FROM	(
-		SELECT 880542 AS cluster_key, cluster_key+880531 AS item_key
+		SELECT 880542 AS cluster_key, cluster_key+880530 AS item_key
 		FROM 	(
 			SELECT DISTINCT cluster_key FROM bw.word3_cluster1
 			) AS a
 		UNION ALL
-		SELECT 880542, 880540
+		SELECT 880542, 880539
 		) AS a
 	GROUP BY cluster_key
 );

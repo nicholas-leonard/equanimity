@@ -66,7 +66,7 @@ FROM	(
 		SELECT a.cluster_key, a.sum, word_id, COUNT(*)
 		FROM	(
 			SELECT a.cluster_key, SUM(a.density)
-			FROM public.itemclusters AS a
+			FROM bw.itemclusters AS a
 			GROUP BY a.cluster_key
 			ORDER BY sum DESC 
 			--OFFSET 10000 
@@ -305,16 +305,36 @@ FROM	(
 	SELECT a.cluster_key, a.sum, b.item_key, b.density
 	FROM	(
 		SELECT a.cluster_key, SUM(a.density)
-		FROM public.itemclusters AS a
+		FROM bw.word_cluster5 AS a
 		GROUP BY a.cluster_key
 		ORDER BY sum DESC 
 		OFFSET 10000 
 		LIMIT 100
-		) AS a, public.itemclusters AS b
+		) AS a, bw.word_cluster5 AS b
 	WHERE b.cluster_key = a.cluster_key
 	) AS a, bw.word_count AS b
 WHERE a.item_key = b.word_id
 ORDER BY a.sum DESC, a.cluster_key ASC, a.density DESC
+
+SELECT a.cluster_key, array_agg(a.s_str)
+FROM(
+SELECT a.cluster_key, a.sum, b.word_str AS s_str, density
+FROM	(
+	SELECT a.cluster_key, a.sum, b.item_key, b.density
+	FROM	(
+		SELECT a.cluster_key, SUM(a.density)
+		FROM bw.word_cluster5 AS a
+		GROUP BY a.cluster_key
+		ORDER BY sum DESC 
+		OFFSET 1000
+		LIMIT 100
+		) AS a, bw.word_cluster5 AS b
+	WHERE b.cluster_key = a.cluster_key
+	) AS a, bw.word_count AS b
+WHERE a.item_key = b.word_id
+ORDER BY a.sum DESC, a.cluster_key ASC, a.density DESC
+) AS a
+GROUP BY a.cluster_key
 
 --word cluster4
 

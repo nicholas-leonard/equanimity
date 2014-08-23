@@ -131,7 +131,7 @@ FROM	(
 		GROUP BY cluster_key
 		) AS a
 	) AS a
-WHERE row_number % 10 = 0
+WHERE row_number % 1000 = 0
 ORDER BY sum DESC
 
 -- cluster 4
